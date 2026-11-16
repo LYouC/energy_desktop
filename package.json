@@ -10,38 +10,54 @@
     "build": "npm run typecheck && vite build",
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
-    "pack": "npm run build && electron-builder --win dir"
+    "pack": "npm run build && electron-builder --win dir",
+    "test:desktop": "npm run build && node tests/desktop.smoke.mjs",
+    "format:check": "prettier --check src shared electron tests vite.config.ts",
+    "format": "prettier --write src shared electron tests vite.config.ts"
   },
   "dependencies": {
-    "vue": "^3.5.24",
-    "pinia": "^3.0.4",
-    "lucide-vue-next": "^0.468.0",
-    "reka-ui": "^2.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "lucide-vue-next": "^0.468.0",
+    "pinia": "^3.0.4",
+    "reka-ui": "^2.6.0",
     "tailwind-merge": "^3.3.1",
+    "vue": "^3.5.24",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@tailwindcss/vite": "^4.1.17",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.2",
-    "@tailwindcss/vite": "^4.1.17",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.0.12",
+    "prettier": "^3.10.1",
     "tailwindcss": "^4.1.17",
+    "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "vite": "^7.2.2",
     "vite-plugin-electron": "^0.29.0",
-    "electron": "^40.0.0",
-    "electron-builder": "^26.0.12",
-    "vue-tsc": "^3.1.4",
-    "tsx": "^4.20.6",
-    "@playwright/test": "^1.56.1"
+    "vue-tsc": "^3.1.4"
   },
   "build": {
     "appId": "local.xixu.desktop",
     "productName": "息序",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "dist-electron/**", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
     "asar": true,
-    "win": { "target": "dir" }
+    "win": {
+      "target": "dir",
+      "signAndEditExecutable": false
+    }
+  },
+  "overrides": {
+    "minimatch": "^11.0.2"
   }
 }

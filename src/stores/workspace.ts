@@ -1,0 +1,37 @@
+import { defineStore } from "pinia";
+import { ref } from "vue";
+import { emptyState, type Command, type State } from "../../shared/model";
+
+export const useWorkspace = defineStore("workspace", () => {
+  const state = ref<State>(emptyState());
+  const ready = ref(false);
+  const error = ref("");
+  let queue: Promise<unknown> = Promise.resolve();
+  async function load() {
+    try {
+      state.value = await window.desktop.load();
+      ready.value = true;
+    } catch (cause) {
+      error.value = String(cause);
+    }
+  }
+  function dispatch(command: Command): Promise<void> {
+    const work = queue.then(async () => {
+      try {
+        state.value = await window.desktop.execute(
+          state.value.revision,
+          JSON.parse(JSON.stringify(command)),
+        );
+        error.value = "";
+      } catch (cause) {
+        error.value = String(cause);
+        // Refresh stale local data after a conflict while keeping the user's form open.
+        state.value = await window.desktop.load();
+        throw cause;
+      }
+    });
+    queue = work.catch(() => {});
+    return work;
+  }
+  return { state, ready, error, load, dispatch };
+});
