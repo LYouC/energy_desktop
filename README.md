@@ -16,11 +16,13 @@
 - `npm run build` 执行类型检查并构建。
 - `npm start` 打开构建后的桌面应用。
 - `npm test` 验证关键业务规则。
-- `npm run test:desktop` 构建并实际操作 Electron，验证主要交互及重启恢复。
+- `npm run test:desktop` 构建并实际操作 Electron，运行主流程和独立审查场景，验证交互、重启恢复、系统主题、弹窗与对比度。
 - `npm run format:check` 检查源码格式。
 - `npm run pack` 构建 Windows 便携目录。
 
 开发分支采用 `codex/desktop-prototype`，每个可验证阶段独立提交。便携开发工具、数据库及构建产物由 `.gitignore` 排除。
+
+当前 39 项业务、SQLite、Pinia 与配色测试通过，独立审查及复验范围见 [测试说明](tests/README.md)。
 
 任务、会话及设置保存在 Electron userData 的 `workspace.db`。验证脚本使用隔离的临时目录，截图在 `test-results/`。设置 `XIXU_DATA_DIR` 可指定独立的数据目录。主题首屏缓存只保存主题选项。
 
