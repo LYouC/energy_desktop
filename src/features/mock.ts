@@ -23,7 +23,8 @@ export function simulateReply(
         rank[a.importance] - rank[b.importance]
       );
     });
-  const focused = tasks.find((task) => task.id === focusedId) ?? tasks[0];
+  const focused =
+    context.unfinishedTasks.find((task) => task.id === focusedId) ?? tasks[0];
   if (!focused)
     return {
       text: "先记下一件想推进的事吧。可以点击“记下一件事”，只填名称开始，再补充完成条件和时间。模拟模式通过任务表单整理背景。",

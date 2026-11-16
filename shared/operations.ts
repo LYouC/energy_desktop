@@ -4,7 +4,9 @@ import {
   type State,
   type Task,
   type Command,
+  type Proposal,
 } from "./model";
+import { z } from "zod";
 
 function findTask(state: State, id: string) {
   const task = state.tasks.find((item) => item.id === id);
@@ -37,7 +39,7 @@ function schedule(state: State, taskId: string, date: string, scope: string) {
   const task = findTask(state, taskId);
   if (["done", "abandoned"].includes(task.status))
     throw new Error("请先恢复任务，再安排推进。");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+  if (!z.iso.date().safeParse(date).success)
     throw new Error("请选择有效的安排日期。");
   const existing = state.arrangements.find(
     (item) => item.taskId === taskId && item.date === date,
@@ -48,6 +50,20 @@ function schedule(state: State, taskId: string, date: string, scope: string) {
   } else state.arrangements.push({ taskId, date, scope, done: false });
   task.plannedDate = date;
   task.version++;
+}
+function addProposal(state: State, proposal: Proposal) {
+  if (!state.sessions.some((session) => session.id === proposal.sessionId))
+    throw new Error("方案所属对话不存在。");
+  if (state.proposals.some((item) => item.id === proposal.id))
+    throw new Error("方案已经存在。");
+  for (const change of proposal.changes) {
+    if (
+      change.status !== "pending" ||
+      findTask(state, change.taskId).version !== change.taskVersion
+    )
+      throw new Error("任务已变化，请重新分析方案。");
+  }
+  state.proposals.push(proposal);
 }
 export function applyCommand(previous: State, input: Command): State {
   const command = commandSchema.parse(input);
@@ -143,16 +159,7 @@ export function applyCommand(previous: State, input: Command): State {
       break;
     }
     case "proposal": {
-      if (state.proposals.some((item) => item.id === command.proposal.id))
-        throw new Error("方案已经存在。");
-      for (const change of command.proposal.changes) {
-        if (
-          change.status !== "pending" ||
-          findTask(state, change.taskId).version !== change.taskVersion
-        )
-          throw new Error("任务已变化，请重新生成方案。");
-      }
-      state.proposals.push(command.proposal);
+      addProposal(state, command.proposal);
       break;
     }
     case "resolve": {
@@ -235,16 +242,7 @@ export function applyCommand(previous: State, input: Command): State {
           command.message.proposalId !== command.proposal.id
         )
           throw new Error("回复与方案关联无效。");
-        if (state.proposals.some((item) => item.id === command.proposal!.id))
-          throw new Error("方案已经保存。");
-        for (const change of command.proposal.changes) {
-          if (
-            change.status !== "pending" ||
-            findTask(state, change.taskId).version !== change.taskVersion
-          )
-            throw new Error("任务已变化，请重新分析。");
-        }
-        state.proposals.push(command.proposal);
+        addProposal(state, command.proposal);
       }
       state.messages.push(command.message);
       const session = state.sessions.find(

@@ -7,8 +7,8 @@
   --surface: #fffefa;
   --chat: #f8f9f4;
   --ink: #303b30;
-  --text: #626f5e;
-  --muted: #6a765f;
+  --text: #5f6c5b;
+  --muted: #606d56;
   --line: #e5e8dd;
   --accent: #536a46;
   --soft: #e7eddf;
@@ -26,7 +26,7 @@
   --chat: #1b221d;
   --ink: #e5ebdd;
   --text: #bac6af;
-  --muted: #98a68b;
+  --muted: #a1af94;
   --line: #384334;
   --accent: #b2c798;
   --soft: #303f2a;
@@ -467,6 +467,7 @@ nav button span {
 }
 .search {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   margin-bottom: 22px;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import Modal from "./Modal.vue";
 import Button from "./ui/button/Button.vue";
 import { useWorkspace } from "@/stores/workspace";
@@ -28,6 +28,12 @@ const scope = ref(
     (item) => item.taskId === props.task.id && item.date === scheduleDate.value,
   )?.scope || draft.value.nextStep,
 );
+watch(scheduleDate, (date) => {
+  scope.value =
+    store.state.arrangements.find(
+      (item) => item.taskId === props.task.id && item.date === date,
+    )?.scope || draft.value.nextStep;
+});
 const existing = computed(() =>
   store.state.tasks.some((task) => task.id === props.task.id),
 );

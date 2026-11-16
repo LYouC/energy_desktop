@@ -11,16 +11,18 @@ export const useWorkspace = defineStore("workspace", () => {
     try {
       state.value = await window.desktop.load();
       ready.value = true;
+      error.value = "";
     } catch (cause) {
       error.value = String(cause);
     }
   }
   function dispatch(command: Command): Promise<void> {
+    const submitted: Command = JSON.parse(JSON.stringify(command));
     const work = queue.then(async () => {
       try {
         state.value = await window.desktop.execute(
           state.value.revision,
-          JSON.parse(JSON.stringify(command)),
+          submitted,
         );
         error.value = "";
       } catch (cause) {

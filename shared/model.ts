@@ -59,7 +59,13 @@ export const proposalSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
   createdAt: z.string(),
-  changes: z.array(changeSchema),
+  changes: z
+    .array(changeSchema)
+    .refine(
+      (changes) =>
+        new Set(changes.map((change) => change.id)).size === changes.length,
+      { message: "方案变更 ID 必须唯一。" },
+    ),
 });
 export type Proposal = z.infer<typeof proposalSchema>;
 export const stateSchema = z.object({
