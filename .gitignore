@@ -1,34 +1,11 @@
-# Dependencies and build output
 node_modules/
 dist/
 dist-electron/
-out/
 release/
-coverage/
-.vite/
-.cache/
-
-# Local configuration and credentials
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-.aws/
-
-# Personal application data
+.tools/
+.env*
 *.db
-*.db-*
-*.sqlite
-*.sqlite-*
-*.sqlite3
-*.sqlite3-*
-*.log
-user-data/
-local-data/
-
-# Editor and OS files
-.idea/
-.DS_Store
-Thumbs.db
+*.db-shm
+*.db-wal
+test-results/
+playwright-report/
