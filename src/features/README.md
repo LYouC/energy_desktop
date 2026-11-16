@@ -2,4 +2,4 @@
 
 `mock.ts` 提供明确标注的模拟回复，用于验证方案展示、部分接受及子任务落地。它采用有限模板，不能理解任意自然语言，也不能验证真实 Agent 的规划效果。`shared/context.ts` 提供可查看的最新能量、任务、历史安排、近期消息与待处理方案。
 
-后续 AI SDK Core 接入后复用业务 Command 与方案接口，替换模拟入口。
+真实 Agent 已通过 `electron/agent/runtime.ts` 接入，使用共享的业务操作与方案接口；界面默认真实模式，模拟模式保留为显式选择的原型验证入口。接口与验证范围见 `electron/agent/README.md`。

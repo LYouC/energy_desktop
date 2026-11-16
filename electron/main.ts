@@ -4,6 +4,8 @@ import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { WorkspaceDatabase } from "./storage";
 import { commandSchema } from "../shared/model";
+import { AgentConfig } from "./agent/config";
+import { AgentRuntime } from "./agent/runtime";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 let database: WorkspaceDatabase | undefined;
@@ -42,6 +44,34 @@ async function createWindow() {
 }
 app.whenReady().then(() => {
   if (!primary) return;
+  // 开发凭据由本地进程读取，配置文件不属于打包文件，也不传入模型上下文。
+  if (!app.isPackaged) {
+    try {
+      process.loadEnvFile(path.join(app.getAppPath(), ".env.agent.local"));
+    } catch {}
+  }
+  const agentConfig = new AgentConfig(app.getPath("userData"));
+  const runtime = new AgentRuntime(
+    {
+      load: () => getDatabase().load(),
+      execute: (revision, command) => getDatabase().execute(revision, command),
+      commitAgentTurn: (revision, sessionId, text, turn, replyId) =>
+        getDatabase().commitAgentTurn(revision, sessionId, text, turn, replyId),
+    },
+    () => agentConfig.connection(),
+  );
+  ipcMain.handle("agent:config", () => agentConfig.publicView());
+  ipcMain.handle("agent:configure", (_event, input: unknown) =>
+    agentConfig.save(input),
+  );
+  ipcMain.handle("agent:send", (event, input: unknown) =>
+    runtime.send(input, (chunk) => {
+      if (!event.sender.isDestroyed()) event.sender.send("agent:event", chunk);
+    }),
+  );
+  ipcMain.handle("agent:cancel", (_event, runId: string) =>
+    runtime.cancel(runId),
+  );
   ipcMain.handle("app:ping", () => "息序桌面已连接");
   ipcMain.handle("workspace:load", () => getDatabase().load());
   ipcMain.handle(

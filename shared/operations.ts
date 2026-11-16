@@ -183,9 +183,40 @@ export function applyCommand(previous: State, input: Command): State {
       for (const change of changes) {
         change.status = command.accept ? "accepted" : "rejected";
         if (!command.accept) continue;
-        if (change.type === "schedule")
+        if (change.type === "schedule") {
+          if (change.fromDate && change.fromDate !== change.date)
+            state.arrangements = state.arrangements.filter(
+              (item) =>
+                item.taskId !== change.taskId || item.date !== change.fromDate,
+            );
           schedule(state, change.taskId, change.date, change.scope);
-        else {
+        } else if (change.type === "update") {
+          if (!change.patch) throw new Error("任务修改内容缺失。");
+          const task = findTask(state, change.taskId);
+          Object.assign(task, change.patch, {
+            version: task.version + 1,
+            updatedAt: now,
+          });
+          checkRelations(state.tasks);
+        } else if (change.type === "unschedule") {
+          const updated = applyCommand(state, {
+            type: "unschedule",
+            taskId: change.taskId,
+            date: change.date,
+          });
+          state.tasks = updated.tasks;
+          state.arrangements = updated.arrangements;
+        } else if (change.type === "stage") {
+          if (change.done === undefined) throw new Error("阶段完成状态缺失。");
+          const updated = applyCommand(state, {
+            type: "stage",
+            taskId: change.taskId,
+            date: change.date,
+            done: change.done,
+          });
+          state.tasks = updated.tasks;
+          state.arrangements = updated.arrangements;
+        } else {
           const parent = findTask(state, change.taskId);
           for (const child of change.children) {
             state.tasks.push({

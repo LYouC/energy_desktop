@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>息序 Agent 运行流程</title>
+    <style>
+      :root{color-scheme:light dark;--bg:#fcfbf8;--surface:#fffefa;--soft:#f1f5ea;--ink:#303b30;--muted:#5f6c5b;--line:#d4dbcc;--accent:#536a46;--active:#e7eddf;--button:#5d7451;--on-button:#fffefa;--warning:#80643e}
+      @media(prefers-color-scheme:dark){:root{--bg:#171c17;--surface:#222a22;--soft:#283323;--ink:#e5ebdd;--muted:#bac6af;--line:#4b5946;--accent:#b2c798;--active:#303f2a;--button:#a9bf8d;--on-button:#192115;--warning:#d1b58c}}
+      *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 "Segoe UI","Microsoft YaHei",sans-serif}main{max-width:1200px;margin:auto;padding:48px 28px 64px}h1{font-size:32px;line-height:1.3;margin:6px 0 14px;letter-spacing:.01em}h2{font-size:20px;line-height:1.5;margin:0 0 12px}h3{font-size:16px;margin:0 0 6px}p{margin:0 0 12px}.brand{color:var(--accent);font-weight:600}.intro{max-width:760px;color:var(--muted)}button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:9px 16px;min-height:44px}button:hover{background:var(--soft)}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:4px}button:disabled{opacity:.5;cursor:default}button[aria-pressed=true]{border-color:var(--accent);background:var(--active);color:var(--accent);font-weight:600}.scenarios{display:flex;gap:10px;flex-wrap:wrap;margin:28px 0 18px}.example{padding:16px 20px;background:var(--soft);border-radius:10px;margin-bottom:26px}.example small{display:block;color:var(--muted)}.example p{margin:4px 0 0;font-size:18px}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.85fr);gap:28px;align-items:start}.flow{display:grid;grid-template-columns:1fr 1fr;gap:16px;list-style:none;padding:0;margin:0}.node{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:16px;min-height:154px}.node.active{border:2px solid var(--accent);background:var(--active);padding:15px}.node.completed{border-color:var(--accent)}.step-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-bottom:8px}.number{font-size:13px;font-weight:600;border:1px solid var(--line);border-radius:50%;width:26px;height:26px;display:grid;place-content:center}.node.active .number{border-color:var(--accent);color:var(--accent)}.node p{font-size:14px;color:var(--muted);line-height:1.6;margin:0}.node code{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin-top:10px}.detail{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:24px;position:sticky;top:20px}.progress{font-size:13px;color:var(--accent);margin-bottom:8px}.detail p{line-height:1.85}.effect{margin-top:20px;padding:14px 16px;background:var(--soft);border-radius:8px}.effect span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}.controls{display:flex;justify-content:space-between;gap:12px;margin-top:24px}.primary{background:var(--button);border-color:var(--button);color:var(--on-button)}.primary:hover{background:var(--button);filter:brightness(.95)}.guardrails{margin-top:34px;padding-top:26px;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(3,1fr);gap:24px}.guardrails p{color:var(--muted);font-size:14px}details{margin-top:26px;border-top:1px solid var(--line);padding-top:18px}summary{cursor:pointer;color:var(--accent)}.technical{margin-top:18px;color:var(--muted);font-size:14px;max-width:920px}.technical code{font-size:13px;overflow-wrap:anywhere}a{color:var(--accent)}.current-status{font-weight:600;color:var(--accent)}
+      @media(max-width:860px){.layout{grid-template-columns:1fr}.detail{position:static;grid-row:1}.guardrails{grid-template-columns:1fr;gap:12px}.node{min-height:140px}main{padding:28px 20px 40px}}
+      @media(max-width:480px){.flow{grid-template-columns:1fr}.node{min-height:0}.scenarios button{flex:1 1 40%}h1{font-size:27px}.detail{padding:20px}.example p{font-size:16px}}
+      @media(prefers-reduced-motion:no-preference){.node{transition:background .15s,border-color .15s}}
+      @media print{button,.controls{display:none}.layout{grid-template-columns:1fr}.detail{position:static}main{padding:0}.guardrails{break-inside:avoid}}
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand">息序 · Agent 设计与实现</div>
+        <h1>一句话如何变成可继续推进的安排</h1>
+        <p class="intro">选择一种对话，逐步查看信息如何流经界面、模型和本地业务层，以及哪一步会保存任务与计划。</p>
+      </header>
+      <nav class="scenarios" aria-label="选择流程场景">
+        <button type="button" data-scenario="advice" aria-pressed="true">分析建议</button>
+        <button type="button" data-scenario="direct" aria-pressed="false">明确修改</button>
+        <button type="button" data-scenario="accept" aria-pressed="false">接受方案</button>
+        <button type="button" data-scenario="cancel" aria-pressed="false">取消与失败</button>
+      </nav>
+      <section class="example" aria-label="用户输入示例"><small id="scenario-label"></small><p id="example"></p></section>
+      <div class="layout">
+        <ol class="flow" aria-label="执行顺序">
+          <li class="node" data-step="0"><div class="step-meta"><span class="number">1</span><span class="step-state"></span></div><h3>用户发起对话</h3><p>捕获当前会话与输入，通过受控 IPC 发起一次运行。</p><code>src/components/ChatPanel.vue</code></li>
+          <li class="node" data-step="1"><div class="step-meta"><span class="number">2</span><span class="step-state"></span></div><h3>读取最新上下文</h3><p>保存用户消息，读取任务、背景、能量、安排和待处理方案。</p><code>electron/agent/runtime.ts<br />shared/context.ts</code></li>
+          <li class="node" data-step="2"><div class="step-meta"><span class="number">3</span><span class="step-state"></span></div><h3>模型判断与工具循环</h3><p>AI SDK Core 组织一次工具循环，按需查询并提交本轮完整结果。</p><code>electron/agent/runtime.ts</code></li>
+          <li class="node" data-step="3"><div class="step-meta"><span class="number">4</span><span class="step-state"></span></div><h3>校验变更与授权</h3><p>校验结构、引用、授权证据与范围，将建议转成待接受方案。</p><code>shared/agent.ts<br />shared/operations.ts</code></li>
+          <li class="node" data-step="4"><div class="step-meta"><span class="number">5</span><span class="step-state"></span></div><h3>本地事务提交</h3><p>核对版本，原子保存本轮回复、背景、正式变更或待接受方案。</p><code>electron/storage.ts</code></li>
+          <li class="node" data-step="5"><div class="step-meta"><span class="number">6</span><span class="step-state"></span></div><h3>界面展示保存结果</h3><p>刷新任务和方案，保留继续协商、逐项接受及错误恢复入口。</p><code>src/components/ChatPanel.vue</code></li>
+        </ol>
+        <section class="detail" aria-live="polite" aria-atomic="true">
+          <div class="progress" id="progress"></div>
+          <h2 id="detail-title"></h2>
+          <p id="detail-text"></p>
+          <div class="effect"><span>此刻的数据变化</span><div id="effect"></div></div>
+          <div class="controls"><button type="button" id="previous">上一步</button><button type="button" class="primary" id="next">下一步</button></div>
+        </section>
+      </div>
+      <section class="guardrails" aria-label="贯穿流程的规则">
+        <div><h3>选择权跟随本轮意图</h3><p>“帮我分析”生成建议。“把英语移到明天”授权具体修改。“只接受英语”只应用对应部分。含糊指代需要核实。</p></div>
+        <div><h3>能量与分析独立</h3><p>手动改变能量只保存状态。主动发送消息后，Agent 才读取最新状态并分析。休息或完成任务的效果通过用户反馈了解。</p></div>
+        <div><h3>凭据留在调用层</h3><p>本地配置向模型服务提供认证。模型看到任务和会话上下文，Key 通过服务请求的认证通道使用。</p></div>
+      </section>
+      <details>
+        <summary>查看编排、校验与模块职责</summary>
+        <div class="technical">
+          <p><code>ChatPanel.vue</code> 管理输入、运行状态、流式临时展示和会话切换。<code>runtime.ts</code> 在应用内串行运行分析，每轮最多六个模型步骤，整轮超时为一百二十秒。上下文包含时区，以及程序计算的今日、明日、本周五和下周五日期锚点。<code>readTask</code> 查询完整任务、子任务和历史安排。<code>calculateCapacity</code> 调用 <code>shared/capacity.ts</code> 核算可用时间、总估时、缺口及包含缓冲的条件性候选。模型结合优先级与真实交付条件选择建议。<code>submitTurn</code> 提交完整回复与动作，先在内存预演，校验失败会反馈到同一循环供模型修正，校验成功后结束循环。</p>
+          <p><code>shared/agent.ts</code> 把完整工具结果转换成有限业务操作。自然语言意图由模型解释，业务层检查本轮原文匹配、否定或试探表达、动作词和操作范围。原文引用能约束明显无关的操作，但语义判断仍可能出错，需要场景测试与持续评审。</p>
+          <p><code>operations.ts</code> 维护任务关系、完成状态和方案接受规则。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量和偏好的快照。草稿、主题或历史消息的变化可以继续处理，规划快照变化时需要重新分析。<code>storage.ts</code> 在事务内再次检查数据版本，原子提交本轮结果。</p>
+          <p><code>config.ts</code> 管理 HTTPS 服务地址、模型与凭据。设置界面输入的 Key 使用 Electron <code>safeStorage</code> 加密保存，也可从执行进程的环境变量读取。界面查询配置只取得服务地址、模型及是否已配置 Key。更换服务地址时需提供相应凭据。</p>
+          <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。工具调用中间结果用于组织本轮输出，正式业务变更以完整结果校验并提交成功为准。普通文本增量和 <code>submitTurn</code> 参数中可解码的 <code>text</code> 前缀用于流式预览，动作参数等待完整校验。最终结果依据本地保存状态展示。</p>
+          <p>本页用于解释编排。实际模型能力与各场景的验证结果见项目测试记录，具体行为依据 <a href="产品需求.md">产品需求</a> 和 <a href="Agent场景用例.md">Agent 场景用例</a>。</p>
+        </div>
+      </details>
+    </main>
+    <script>
+      const scenes = {
+        advice: {
+          label: "用户请求分析 · 可能提出安排调整",
+          example: "今天只剩一小时了，帮我看看报告和英语怎么安排。",
+          steps: [
+            ["发送消息才开始分析", "用户发送后，界面锁定本次会话与运行标识。切换主题、导航和手动修改能量走各自的数据入口。", "本轮输入交给本地服务。"],
+            ["把真实条件交给模型", "本地服务保存这条用户消息，重新组装当前任务、真实截止、今日范围、最新能量、背景和近期协商。", "保存用户消息，读取最新业务状态。"],
+            ["综合约束提出一份建议", "模型结合一小时条件和已有背景判断先做什么、做到哪里、保住什么。必要时调用有限查询工具，随后提交本轮说明与建议变更。", "工具中间结果暂存于本轮运行。"],
+            ["将新建议保存为待接受方案", "结构与业务校验检查涉及的任务、日期、版本和变更范围。Agent 新提出的调整进入待接受方案，用户可以逐项接受。", "形成完整待提交回复与方案。"],
+            ["回复和方案一起保存", "事务核对运行所依据的数据版本，将回复与待接受方案一起提交。相关数据变化时返回冲突，保留后续重新分析入口。", "新增回复与待接受方案，原安排继续有效。"],
+            ["看清建议和已经生效的安排", "界面读取保存结果，展示方案理由、今日范围和接受状态。用户选择某项后，业务层只应用被接受的部分。", "用户可以继续协商或逐项接受方案。"]
+          ]
+        },
+        direct: {
+          label: "用户明确授权 · 修改已知任务",
+          example: "把英语移到明天，今天不做了。",
+          steps: [
+            ["捕获明确修改请求", "界面将原始输入和当前会话发送给本地执行层，用户的这句话成为本轮授权来源。", "发起一次有独立运行标识的请求。"],
+            ["定位英语任务及今日安排", "服务保存消息并读取最新任务与安排。存在多个同名任务或指代不清时，模型应先核实对象。", "保存用户消息，任务仍保持当前状态。"],
+            ["解释操作与授权范围", "模型将这句话解释为英语安排从今天移到明天，提交有限操作及引用的用户原文。报告等其他任务保持各自授权边界。", "准备本轮完整变更结果。"],
+            ["检查对应任务和原文证据", "校验器核对任务引用、日期、授权证据和操作范围。自然语言授权仍依赖模型理解，场景测试会检查误解、否定表达和含糊指代。", "确认结果可进入业务操作层。"],
+            ["一次提交安排和回复", "业务层核对版本，在同一事务内迁移对应安排并保存回复。数据库成功返回后，运行才报告操作已生效。", "英语的今日安排移到明天，整体完成状态和真实截止保留。"],
+            ["反馈具体结果", "界面刷新今日安排和任务状态，回复说明英语已经移到哪一天。用户无需再次确认已经表达清楚的同一决定。", "用户看到正式安排已更新。"]
+          ]
+        },
+        accept: {
+          label: "当前会话已有方案 · 接受其中一项",
+          example: "只接受英语改期，报告还是按原来的。",
+          steps: [
+            ["发送本轮接受范围", "用户可以通过对话表达，也可以点击方案中的接受按钮。这里演示通过对话接受当前会话的一项变更。", "发送原文接受范围。"],
+            ["读取当前会话的待处理方案", "服务保存消息，读取方案标识、每项接受状态和关联任务的最新版本，明确英语和报告分别对应哪项。", "保存用户消息，读取待接受方案。"],
+            ["解析只接受哪一项", "模型提交当前会话方案的对应变更标识。若存在多个可能指向，先核实；若变更依赖其他步骤，解释依赖并协商范围。", "准备有限的接受操作。"],
+            ["检查归属、范围与依赖", "校验器检查方案属于当前会话、变更仍待处理、用户接受范围对应有效条目。被拒绝或已接受的结果按业务规则处理。", "确认待执行的接受范围。"],
+            ["应用接受部分并记录状态", "事务验证任务版本，只执行英语对应变更并更新方案状态。重复提交已经应用的接受操作不会重复创建安排。", "英语调整生效，报告继续原安排。"],
+            ["展示部分接受", "方案条目显示已经接受或拒绝的结果，今日安排反映真正生效的部分。后续继续协商时使用最新数据。", "接受结果与任务变化能够相互核对。"]
+          ]
+        },
+        cancel: {
+          label: "完整结果提交前取消或发生网络错误",
+          example: "拆分方案还在生成，我点击了取消。",
+          steps: [
+            ["启动可取消的运行", "界面为消息分配运行标识，显示取消按钮。取消请求只对应正在处理的那次运行。", "本地服务开始处理用户输入。"],
+            ["保留用户输入", "用户消息先保存，便于失败后继续或重试。后续业务操作在本轮完整结果校验之前暂存。", "已有用户消息，业务数据尚待本轮结果。"],
+            ["取消传递到模型请求", "执行层通过取消信号中止请求与工具循环。网络错误或超时也进入失败处理，结束临时生成状态。", "清理本轮暂存结果。"],
+            ["中断结果不进入正式应用", "完整结果提交前中断，本轮任务、背景和方案变更都不提交。半段流式文字只代表生成进度。", "正式任务和安排保留先前已保存结果。"],
+            ["依据真实提交状态处理恢复", "若取消或断网发生在事务已成功之后，已生效结果继续保留。恢复时读取数据库状态，避免误报和重复执行。", "用户消息保留，已提交结果可查询。"],
+            ["显示可恢复状态", "界面明确显示取消或错误，并刷新已保存数据。用户可以继续发送消息、修改任务，或根据最新状态重试。", "退出处理中状态，恢复正常交互。"]
+          ]
+        }
+      };
+      let scene = "advice";
+      let step = 0;
+      const byId = (id) => document.getElementById(id);
+      function render() {
+        const selected = scenes[scene];
+        const detail = selected.steps[step];
+        byId("scenario-label").textContent = selected.label;
+        byId("example").textContent = selected.example;
+        byId("progress").textContent = `第 ${step + 1} 步，共 6 步`;
+        byId("detail-title").textContent = detail[0];
+        byId("detail-text").textContent = detail[1];
+        byId("effect").textContent = detail[2];
+        document.querySelectorAll("[data-scenario]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.scenario === scene)));
+        document.querySelectorAll("[data-step]").forEach((node, index) => {
+          node.classList.toggle("active", index === step);
+          node.classList.toggle("completed", index < step);
+          if (index === step) node.setAttribute("aria-current", "step");
+          else node.removeAttribute("aria-current");
+          node.querySelector(".step-state").textContent = index === step ? "当前步骤" : index < step ? "已经过" : "后续步骤";
+        });
+        byId("previous").disabled = step === 0;
+        byId("next").disabled = step === selected.steps.length - 1;
+      }
+      document.querySelectorAll("[data-scenario]").forEach((button) => button.addEventListener("click", () => { scene = button.dataset.scenario; step = 0; render(); }));
+      byId("previous").addEventListener("click", () => { if (step > 0) step--; render(); });
+      byId("next").addEventListener("click", () => { if (step < 5) step++; render(); });
+      render();
+    </script>
+  </body>
+</html>

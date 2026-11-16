@@ -27,12 +27,22 @@ export const taskSchema = z.object({
   dependencies: z.array(z.string()),
   background: z.string(),
   backgroundKind: z.enum(["用户事实", "暂估", "推测"]),
+  backgroundSource: z.string().optional(),
   progress: z.string(),
   obstacle: z.string(),
   nextStep: z.string(),
   updatedAt: z.string(),
 });
 export type Task = z.infer<typeof taskSchema>;
+// Agent 只允许修改这些业务字段，ID、版本和更新时间由应用维护。
+export const taskPatchSchema = taskSchema
+  .omit({
+    id: true,
+    version: true,
+    updatedAt: true,
+    backgroundSource: true,
+  })
+  .partial();
 export const arrangementSchema = z.object({
   taskId: z.string(),
   date: z.string(),
@@ -46,13 +56,16 @@ const changeSchema = z.object({
   taskVersion: z.number(),
   label: z.string(),
   reason: z.string(),
-  type: z.enum(["schedule", "split"]),
+  type: z.enum(["schedule", "split", "update", "unschedule", "stage"]),
   date: z.string(),
   scope: z.string(),
   children: z.array(
     z.object({ title: z.string().min(1), goal: z.string().min(1) }),
   ),
   status: z.enum(["pending", "accepted", "rejected"]),
+  patch: taskPatchSchema.optional(),
+  fromDate: z.string().optional(),
+  done: z.boolean().optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
 export const proposalSchema = z.object({

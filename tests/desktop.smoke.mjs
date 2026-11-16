@@ -16,6 +16,7 @@ async function launch() {
   await expect(
     page.getByRole("heading", { name: "今天，留一点余地。" }),
   ).toBeVisible();
+  await page.getByLabel("对话模式").selectOption("mock");
   return { app, page };
 }
 let { app, page } = await launch();

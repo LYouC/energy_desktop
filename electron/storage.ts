@@ -6,6 +6,7 @@ import {
   type State,
 } from "../shared/model";
 import { applyCommand } from "../shared/operations";
+import { applyAgentTurn } from "../shared/agent";
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -39,12 +40,28 @@ export class WorkspaceDatabase {
     return stateSchema.parse(JSON.parse(row.payload));
   }
   execute(revision: number, command: Command) {
+    return this.transact(revision, (previous) =>
+      applyCommand(previous, command),
+    );
+  }
+  commitAgentTurn(
+    revision: number,
+    sessionId: string,
+    userText: string,
+    turn: unknown,
+    replyId?: string,
+  ) {
+    return this.transact(revision, (previous) =>
+      applyAgentTurn(previous, sessionId, userText, turn, replyId),
+    );
+  }
+  private transact(revision: number, transform: (previous: State) => State) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const previous = this.load();
       if (previous.revision !== revision)
         throw new Error("数据已更新，请重试这项操作。");
-      const next = applyCommand(previous, command);
+      const next = transform(previous);
       this.db
         .prepare("UPDATE workspace SET revision=?, payload=? WHERE id=1")
         .run(next.revision, JSON.stringify(next));

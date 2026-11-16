@@ -11,11 +11,15 @@
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
     "pack": "install-electron && npm run build && electron-builder --win dir --config.electronDist=node_modules/electron/dist",
-    "test:desktop": "npm run build && node tests/desktop.smoke.mjs && node tests/review.desktop.mjs",
+    "test:desktop": "npm run build && node tests/desktop.smoke.mjs && node tests/review.desktop.mjs && node tests/agent-ui.desktop.mjs",
+    "test:agent:live": "node --import tsx tests/agent.live.ts",
+    "test:agent:journey": "node --import tsx tests/agent-journey.live.ts",
     "format:check": "prettier --check src shared electron tests vite.config.ts",
     "format": "prettier --write src shared electron tests vite.config.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.92",
+    "ai": "^7.0.173",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.468.0",

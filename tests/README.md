@@ -5,6 +5,11 @@
 - `npm test` 运行业务规则、SQLite、Pinia 队列和双主题配色回归。
 - `npm run test:desktop` 构建并运行完整 Electron 交互验证。
 - `node tests/review.desktop.mjs` 对已构建的应用执行独立审查场景。
+- `node tests/agent-ui.desktop.mjs` 使用固定 IPC 流验证配置恢复、流式、取消与切会话，不调用真实模型。
+- `npm run test:agent:live` 串行执行六条真实模型实验，会产生 API 调用，使用本地 `.env.agent.local`，脱敏业务结果写入忽略的 `test-results/agent-live.json`。
+- `node tests/agent-real.desktop.mjs` 实际发送一次桌面对话并检查 SQLite 与重启，会产生 API 调用。
+- `npm run test:agent:journey` 串行验证 S01 七轮连续对话，末轮使用序列化重读状态同日继续；会产生 API 调用，不能代替跨日和桌面重启检查。
+- `node tests/pack.smoke.mjs` 对生成的 Windows 目录包验证 Agent 入口、IPC 和凭据隔离。
 
 桌面脚本通过 `XIXU_DATA_DIR` 使用隔离临时目录，截图及结果写入被忽略的 `test-results/`。受限环境启动 Electron 时可能需要允许本地子进程。
 
@@ -22,5 +27,7 @@
 修复后独立重新运行 39 项业务 / 存储 / 状态 / 配色测试，全部通过。`review.desktop.mjs` 的实际界面断言通过，验证了系统主题实时变化、手选主题优先、草稿 / 消息 / 安排保持、已有日期范围联动、子任务聚焦、实际 DOM 文字对比度、800px 窄窗口和弹窗键盘焦点。浅深主题的今日安排、任务列表、任务弹窗及窄窗口截图已经人工查看。
 
 ## 阶段判断
+
+首轮 Agent 新增领域、运行及容量核算回归，当前共 57 项。真实模型六条实验、S01 连续七轮与真实桌面创建/重启结果另见 `docs/Agent验证记录.md`，程序断言与语义评审分别记录。既有原型审查记录保留其当时范围。
 
 当前用例足以支持本地交互原型的受控试用与后续迭代。验收继续保留真实用户操作观察、不同 Windows 显示缩放、长时间使用及更大历史数据量的验证。AI API 接入后还需验证自然语言授权、事实提炼、规划质量、网络失败和真实流式取消。产品验收 A01–A14 的覆盖范围以 `docs/技术方案.md` 为准。

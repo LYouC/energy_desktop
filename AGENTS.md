@@ -1,7 +1,7 @@
 
 # 项目目标
 
-开发“息序”桌面 Agent Todo：通过对话理解目标与背景，拆分大任务、协商每日安排，并帮助用户应对启动困难、受挫和精力变化。当前仓库是已认可的浅色视觉原型与实现依据，正式应用尚未开发。
+开发“息序”桌面 Agent Todo：通过对话理解目标与背景，拆分大任务、协商每日安排，并帮助用户应对启动困难、受挫和精力变化。当前仓库包含桌面交互原型与首轮真实 Agent，实际完成和验证范围见 README 与技术方案。
 
 ## 接手顺序
 
@@ -20,6 +20,7 @@
 | 桌面与本地保存 | 隔离 IPC、SQLite 事务及版本检查 | `electron/main.ts`、`electron/storage.ts`；`electron/README.md` |
 | 工作台 | 三栏、任务详情、今日安排、双主题与界面状态 | `src/App.vue`、`src/stores/workspace.ts`；`src/README.md` |
 | 模拟会话与上下文 | 模板回复、方案展示、会话与草稿、上下文预览 | `src/components/ChatPanel.vue`、`src/features/mock.ts`；`src/features/README.md` |
+| Agent 运行与模型配置 | AI SDK 单循环、有限工具、授权草案、整轮提交、流式与取消、系统保护凭据 | `electron/agent/runtime.ts`、`shared/agent.ts`、`src/components/ModelSettings.vue`；`electron/agent/README.md` |
 
 ## 约束
 

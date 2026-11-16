@@ -22,6 +22,7 @@ try {
   await expect(
     page.getByRole("heading", { name: "今天，留一点余地。" }),
   ).toBeVisible();
+  await page.getByLabel("对话模式").selectOption("mock");
   await page.evaluate(async () => {
     let state = await window.desktop.load();
     const task = (id, title, parentId = null) => ({
@@ -67,6 +68,7 @@ try {
     });
   });
   await page.reload();
+  await page.getByLabel("对话模式").selectOption("mock");
   await expect(page.locator(".task-card")).toHaveCount(1);
   await settings("system");
   await page.emulateMedia({ colorScheme: "light" });
