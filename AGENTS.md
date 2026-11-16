@@ -14,6 +14,15 @@
 
 ## 约束
 
+## 已落地模块索引
+
+| 模块 | 职责 | 入口与说明 |
+| --- | --- | --- |
+| 业务模型与操作 | 任务、阶段安排、方案接受、关系校验、能量与会话操作 | `shared/model.ts`、`shared/operations.ts`；`shared/README.md` |
+| 桌面与本地保存 | 隔离 IPC、SQLite 事务及版本检查 | `electron/main.ts`、`electron/storage.ts`；`electron/README.md` |
+
+## 实现约束
+
 - 使用 Vue 3、TypeScript、Vite、Pinia、shadcn-vue、Tailwind CSS、Electron、Vercel AI SDK Core、SQLite。个人使用，用户自配模型 API Key；不重开框架选型，不叠加第二套 Agent 循环。
 - 左侧是导航。“所有任务”在主工作区显示简洁列表，与详细“今日安排”切换；不在左侧列任务。不引入外部 Todo、收集箱或“接下来”。任务图留待未来。
 - 能量采用离散状态。手动改状态只更新数据；用户主动发送消息后才分析。AI 主动提出的计划修改先协商，用户已明确授权的操作不重复确认。
