@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, newTask } from "../shared/model";
+import { emptyState, newTask, stateSchema } from "../shared/model";
 import { applyCommand } from "../shared/operations";
 import { agentTurnSchema, applyAgentTurn } from "../shared/agent";
 import { WorkspaceDatabase } from "../electron/storage";
+import { buildContext, readConversation } from "../shared/context";
 
 function fixture() {
   return applyCommand(emptyState(), {
@@ -11,7 +12,282 @@ function fixture() {
     task: { ...newTask(), title: "英语" },
   });
 }
-test("按这份拆分建子任务是明确接受，否定和试探仍被拦截", () => {
+
+test("直接采用相同拆分会接受原方案且重试不重复子任务", () => {
+  const initial = fixture();
+  const taskId = initial.tasks[0].id;
+  const children = [{ title: "朗读一页", goal: "朗读完整一页并标记生词" }];
+  const proposed = applyAgentTurn(
+    initial,
+    initial.activeSessionId,
+    "怎么拆分",
+    {
+      text: "拆分待接受",
+      actions: [{ type: "split", taskId, children, mode: "proposal" }],
+    },
+  );
+  const proposalId = proposed.proposals[0].id;
+  const adopted = applyAgentTurn(
+    proposed,
+    proposed.activeSessionId,
+    "就照这个拆分建好",
+    {
+      text: "已建立",
+      actions: [{ type: "split", taskId, children, mode: "direct" }],
+    },
+  );
+  assert.equal(
+    adopted.proposals.find((p) => p.id === proposalId)?.changes[0].status,
+    "accepted",
+  );
+  assert.equal(adopted.tasks.filter((t) => t.parentId === taskId).length, 1);
+  const retried = applyCommand(adopted, {
+    type: "resolve",
+    proposalId,
+    ids: [adopted.proposals.find((p) => p.id === proposalId)!.changes[0].id],
+    accept: true,
+  });
+  assert.equal(retried.tasks.filter((t) => t.parentId === taskId).length, 1);
+});
+
+function arrangementFixture() {
+  let state = emptyState();
+  const parent = { ...newTask(), title: "报告" };
+  const child = { ...newTask(parent.id), title: "整理提纲" };
+  state = applyCommand(state, { type: "saveTask", task: parent });
+  state = applyCommand(state, { type: "saveTask", task: child });
+  state = applyCommand(state, {
+    type: "schedule",
+    taskId: parent.id,
+    date: "2026-11-17",
+    scope: "整理报告提纲",
+  });
+  return { state, parentId: parent.id, childId: child.id };
+}
+
+test("更新安排直接父转子原子替换且不重复计算今日工作", () => {
+  const { state, parentId, childId } = arrangementFixture();
+  const next = applyAgentTurn(
+    state,
+    state.activeSessionId,
+    "今天改为三个问题",
+    {
+      text: "已更新范围",
+      actions: [
+        {
+          type: "updateArrangement",
+          taskId: parentId,
+          date: "2026-11-17",
+          targetTaskId: childId,
+          scope: "列三个讨论问题",
+          mode: "direct",
+        },
+      ],
+    },
+  );
+  assert.equal(next.arrangements.length, 1);
+  assert.equal(next.arrangements[0].taskId, childId);
+  assert.equal(next.arrangements[0].scope, "列三个讨论问题");
+  assert.equal(next.tasks.find((t) => t.id === parentId)?.plannedDate, "");
+  assert.equal(
+    next.tasks.find((t) => t.id === childId)?.plannedDate,
+    "2026-11-17",
+  );
+  assert.equal(state.arrangements[0].taskId, parentId);
+});
+
+test("更新安排建议待接受，接受后父转子只有一个安排", () => {
+  const { state, parentId, childId } = arrangementFixture();
+  const proposed = applyAgentTurn(
+    state,
+    state.activeSessionId,
+    "重新看看今天",
+    {
+      text: "建议缩小范围",
+      actions: [
+        {
+          type: "updateArrangement",
+          taskId: parentId,
+          date: "2026-11-17",
+          targetTaskId: childId,
+          scope: "列三个讨论问题",
+          mode: "proposal",
+        },
+      ],
+    },
+  );
+  assert.deepEqual(proposed.arrangements, state.arrangements);
+  const proposal = proposed.proposals[0];
+  assert.equal(proposal.changes[0].fromTaskId, parentId);
+  assert.equal(proposal.changes[0].taskId, childId);
+  const next = applyCommand(proposed, {
+    type: "resolve",
+    proposalId: proposal.id,
+    ids: [proposal.changes[0].id],
+    accept: true,
+  });
+  assert.equal(next.arrangements.length, 1);
+  assert.equal(next.arrangements[0].taskId, childId);
+  assert.equal(next.arrangements[0].scope, "列三个讨论问题");
+});
+
+test("源安排所属任务变化后拒绝旧替换方案并保留完整状态", () => {
+  const { state: initial, parentId, childId } = arrangementFixture();
+  let state = applyAgentTurn(initial, initial.activeSessionId, "重新看看", {
+    text: "建议调整",
+    actions: [
+      {
+        type: "updateArrangement",
+        taskId: parentId,
+        date: "2026-11-17",
+        targetTaskId: childId,
+        scope: "三个问题",
+        mode: "proposal",
+      },
+    ],
+  });
+  const proposal = state.proposals[0];
+  state = applyCommand(state, {
+    type: "saveTask",
+    task: {
+      ...state.tasks.find((t) => t.id === parentId)!,
+      goal: "用户修正后的目标",
+    },
+  });
+  const before = structuredClone(state);
+  assert.throws(
+    () =>
+      applyCommand(state, {
+        type: "resolve",
+        proposalId: proposal.id,
+        ids: [proposal.changes[0].id],
+        accept: true,
+      }),
+    /原安排所属任务已变化/,
+  );
+  assert.deepEqual(state, before);
+});
+
+test("同任务改安排范围保持今日顺序及其他任务安排", () => {
+  const { state: initial, parentId, childId } = arrangementFixture();
+  const state = applyCommand(initial, {
+    type: "schedule",
+    taskId: childId,
+    date: "2026-11-17",
+    scope: "另一个已有阶段",
+  });
+  const beforeIds = state.arrangements.map((a) => a.taskId);
+  const next = applyAgentTurn(state, state.activeSessionId, "改一下今天范围", {
+    text: "已更新",
+    actions: [
+      {
+        type: "updateArrangement",
+        taskId: parentId,
+        date: "2026-11-17",
+        scope: "列三个讨论问题",
+        mode: "direct",
+      },
+    ],
+  });
+  assert.deepEqual(
+    next.arrangements.map((a) => a.taskId),
+    beforeIds,
+  );
+  assert.equal(next.arrangements[0].scope, "列三个讨论问题");
+  assert.deepEqual(next.arrangements[1], state.arrangements[1]);
+});
+
+test("修改不存在的源安排被拒绝且不产生新安排", () => {
+  const { state, parentId, childId } = arrangementFixture();
+  const before = structuredClone(state);
+  assert.throws(
+    () =>
+      applyAgentTurn(state, state.activeSessionId, "改一下范围", {
+        text: "已改",
+        actions: [
+          {
+            type: "updateArrangement",
+            taskId: parentId,
+            date: "2026-11-18",
+            targetTaskId: childId,
+            scope: "三个问题",
+            mode: "direct",
+          },
+        ],
+      }),
+    /已存在的原taskId/,
+  );
+  assert.deepEqual(state, before);
+});
+
+test("同源替代方案接受一项后另一项失效，同批冲突原子回滚", () => {
+  const { state: initial, parentId, childId } = arrangementFixture();
+  const alternate = { ...newTask(parentId), title: "另一个阶段" };
+  const withAlternate = applyCommand(initial, {
+    type: "saveTask",
+    task: alternate,
+  });
+  let state = applyAgentTurn(
+    withAlternate,
+    withAlternate.activeSessionId,
+    "给两个候选方案",
+    {
+      text: "两个替代候选",
+      actions: [
+        {
+          type: "updateArrangement",
+          taskId: parentId,
+          date: "2026-11-17",
+          targetTaskId: childId,
+          scope: "A",
+          mode: "proposal",
+        },
+        {
+          type: "updateArrangement",
+          taskId: parentId,
+          date: "2026-11-17",
+          targetTaskId: alternate.id,
+          scope: "B",
+          mode: "proposal",
+        },
+      ],
+    },
+  );
+  const proposal = state.proposals[0];
+  const allBefore = structuredClone(state);
+  assert.throws(
+    () =>
+      applyCommand(state, {
+        type: "resolve",
+        proposalId: proposal.id,
+        ids: proposal.changes.map((c) => c.id),
+        accept: true,
+      }),
+    /原安排已不存在/,
+  );
+  assert.deepEqual(state, allBefore);
+  state = applyCommand(state, {
+    type: "resolve",
+    proposalId: proposal.id,
+    ids: [proposal.changes[0].id],
+    accept: true,
+  });
+  const acceptedBefore = structuredClone(state);
+  assert.throws(
+    () =>
+      applyCommand(state, {
+        type: "resolve",
+        proposalId: proposal.id,
+        ids: [proposal.changes[1].id],
+        accept: true,
+      }),
+    /原安排已不存在/,
+  );
+  assert.deepEqual(state, acceptedBefore);
+  assert.equal(state.arrangements.length, 1);
+  assert.equal(state.arrangements[0].scope, "A");
+});
+test("模型用具体变更ID表达自然确认的接受范围", () => {
   const initial = fixture();
   const state = applyAgentTurn(
     initial,
@@ -39,7 +315,7 @@ test("按这份拆分建子任务是明确接受，否定和试探仍被拦截",
     },
   );
   const proposal = state.proposals[0];
-  const quote = "就按你这份拆分建子任务";
+  const quote = "按你的建议，先落实拆分的部分";
   const turn = {
     text: "已建立子任务",
     actions: [
@@ -62,26 +338,20 @@ test("按这份拆分建子任务是明确接受，否定和试探仍被拦截",
   assert.equal(next.tasks.length, 2);
   assert.equal(next.arrangements.length, 0);
   assert.equal(next.proposals[0].changes[1].status, "pending");
-  assert.throws(
-    () =>
-      applyAgentTurn(state, state.activeSessionId, quote, {
-        ...turn,
-        actions: [
-          { ...turn.actions[0], ids: proposal.changes.map((c) => c.id) },
-        ],
-      }),
-    /只授权拆分/,
-  );
-  for (const prefix of ["不要", "能不能"]) {
-    assert.throws(
-      () =>
-        applyAgentTurn(state, state.activeSessionId, prefix + quote, {
-          ...turn,
-          actions: [{ ...turn.actions[0], quote: prefix + quote }],
-        }),
-      /授权/,
-    );
-  }
+  const allQuote = "按你的建议，这两项都落实";
+  const all = applyAgentTurn(state, state.activeSessionId, allQuote, {
+    ...turn,
+    actions: [
+      {
+        ...turn.actions[0],
+        quote: allQuote,
+        ids: proposal.changes.map((c) => c.id),
+      },
+    ],
+  });
+  assert.equal(all.tasks.length, 2);
+  assert.equal(all.arrangements.length, 1);
+  assert(all.proposals[0].changes.every((c) => c.status === "accepted"));
 });
 test("建立任务与待接受拆分可同轮提交，引用由应用分配", () => {
   const state = emptyState();
@@ -164,31 +434,18 @@ test("事实背景有来源，不能通过context偷偷改截止", () => {
   assert.equal(next.tasks[0].deadline, "");
   assert.equal(next.tasks[0].backgroundSource, "没拿到材料");
 });
-test("否定完成与试探建议均不能变成直接操作", () => {
+test("模型判断为讨论或否定时空动作保留任务与安排", () => {
   const state = fixture();
   for (const text of ["还没完成", "要不要改到明天"]) {
-    const action =
-      text === "还没完成"
-        ? { type: "updateTask", patch: { status: "done" } }
-        : { type: "schedule", date: "2026-11-17", scope: "英语" };
-    assert.throws(
-      () =>
-        applyAgentTurn(state, state.activeSessionId, text, {
-          text: "错误",
-          actions: [
-            {
-              ...action,
-              taskId: state.tasks[0].id,
-              mode: "direct",
-              quote: text,
-            },
-          ],
-        }),
-      /授权/,
-    );
+    const next = applyAgentTurn(state, state.activeSessionId, text, {
+      text: "继续讨论具体情况",
+      actions: [],
+    });
+    assert.deepEqual(next.tasks, state.tasks);
+    assert.deepEqual(next.arrangements, state.arrangements);
   }
 });
-test("编造原文被拒绝，后续失败会撤回整轮早先操作", () => {
+test("后续重复创建失败会撤回整轮早先操作", () => {
   const state = emptyState();
   assert.throws(
     () =>
@@ -204,14 +461,14 @@ test("编造原文被拒绝，后续失败会撤回整轮早先操作", () => {
           },
           {
             type: "createTask",
-            title: "英语",
+            title: "报告",
             patch: {},
             mode: "direct",
             quote: "添加英语",
           },
         ],
       }),
-    /原文/,
+    /同名/,
   );
   assert.equal(state.tasks.length, 0);
 });
@@ -351,56 +608,164 @@ test("动作协议排除能量及任意命令", () => {
   );
 });
 
-test("截断原文不能绕过否定完成，记录已完成任务需要完成事实", () => {
+test("自然确认可采用模型整理的标题，真实来源由应用绑定", () => {
   const state = fixture();
-  assert.throws(
-    () =>
-      applyAgentTurn(state, state.activeSessionId, "还没完成", {
-        text: "已完成",
-        actions: [
-          {
-            type: "updateTask",
-            taskId: state.tasks[0].id,
-            patch: { status: "done" },
-            mode: "direct",
-            quote: "完成",
-          },
-        ],
-      }),
-    /授权/,
-  );
-  assert.throws(
-    () =>
-      applyAgentTurn(state, state.activeSessionId, "记下报告", {
-        text: "已记录",
-        actions: [
-          {
-            type: "createTask",
-            title: "报告",
-            patch: { status: "done" },
-            mode: "direct",
-            quote: "记下报告",
-          },
-        ],
-      }),
-    /进展状态/,
-  );
-  const next = applyAgentTurn(
-    state,
-    state.activeSessionId,
-    "记下报告，已经完成了",
+  const next = applyAgentTurn(state, state.activeSessionId, "好，就建这个", {
+    text: "已建立任务",
+    actions: [
+      {
+        type: "createTask",
+        title: "整理项目复盘材料",
+        patch: { goal: "整理出用于项目复盘的材料目录" },
+        mode: "direct",
+        quote: "模型对多轮交流的概括",
+      },
+    ],
+  });
+  assert.equal(next.tasks.at(-1)?.backgroundSource, "好，就建这个");
+  assert.equal(next.tasks.at(-1)?.title, "整理项目复盘材料");
+  assert.equal(next.tasks.at(-1)?.status, "todo");
+  assert.equal(state.tasks.length, 1);
+});
+
+test("草拟任务随会话持久化，自然确认创建后可清除草稿", () => {
+  const initial = emptyState();
+  const drafted = applyAgentTurn(
+    initial,
+    initial.activeSessionId,
+    "我想整理复盘材料",
     {
-      text: "已记录完成事实",
+      text: "可以整理成一个材料归档任务，你看这样是否合适？",
+      actions: [],
+      memory: {
+        summary: "用户想整理项目复盘材料，正在确认任务范围",
+        taskDraft: { title: "整理复盘材料", patch: { goal: "整理出材料目录" } },
+      },
+    },
+  );
+  assert.equal(drafted.tasks.length, 0);
+  const restored = stateSchema.parse(JSON.parse(JSON.stringify(drafted)));
+  assert.equal(
+    restored.sessions[0].agentMemory?.taskDraft?.title,
+    "整理复盘材料",
+  );
+  const confirmed = applyAgentTurn(
+    restored,
+    restored.activeSessionId,
+    "好，就建这个",
+    {
+      text: "已建立",
       actions: [
         {
           type: "createTask",
-          title: "报告",
-          patch: { status: "done" },
+          title: "整理复盘材料",
+          patch: { goal: "整理出材料目录" },
           mode: "direct",
-          quote: "记下报告，已经完成了",
+          quote: "好，就建这个",
         },
       ],
     },
   );
-  assert.equal(next.tasks.at(-1)?.status, "done");
+  assert.equal(confirmed.tasks.length, 1);
+  assert.equal(confirmed.sessions[0].agentMemory?.taskDraft, null);
+  assert.equal(
+    stateSchema.parse(JSON.parse(JSON.stringify(initial))).sessions[0]
+      .agentMemory,
+    undefined,
+  );
+});
+
+test("会话草拟隔离，省略memory时保留现有草稿", () => {
+  const initial = emptyState();
+  let state = applyAgentTurn(initial, initial.activeSessionId, "想做报告", {
+    text: "先讨论",
+    actions: [],
+    memory: { summary: "报告草拟", taskDraft: { title: "报告", patch: {} } },
+  });
+  const first = state.activeSessionId;
+  state = applyCommand(state, { type: "session", id: "second" });
+  state = applyAgentTurn(state, "second", "聊一下英语", {
+    text: "继续",
+    actions: [],
+  });
+  assert.equal(
+    state.sessions.find((s) => s.id === "second")?.agentMemory,
+    undefined,
+  );
+  assert.equal(
+    state.sessions.find((s) => s.id === first)?.agentMemory?.taskDraft?.title,
+    "报告",
+  );
+  state = applyAgentTurn(state, first, "还有个问题", {
+    text: "继续讨论",
+    actions: [],
+  });
+  assert.equal(
+    state.sessions.find((s) => s.id === first)?.agentMemory?.taskDraft?.title,
+    "报告",
+  );
+});
+
+test("历史读取按会话分页并能找回近期窗口之外的事实", () => {
+  let state = emptyState();
+  const sessionId = state.activeSessionId;
+  for (let i = 0; i < 17; i++) {
+    state = applyCommand(state, {
+      type: "message",
+      message: {
+        id: `history-${i}`,
+        sessionId,
+        role: i % 2 ? "assistant" : "user",
+        text:
+          i === 0
+            ? "受众是跨部门新人，格式为背景、影响、下一步"
+            : `中性交流${i}`,
+        createdAt: new Date().toISOString(),
+      },
+    });
+  }
+  state = applyCommand(state, { type: "session", id: "another" });
+  state = applyCommand(state, {
+    type: "message",
+    message: {
+      id: "private-other",
+      sessionId: "another",
+      role: "user",
+      text: "另一会话内容",
+      createdAt: new Date().toISOString(),
+    },
+  });
+  const context = buildContext(state, sessionId);
+  assert.equal(context.recentMessages.length, 12);
+  assert.equal(
+    context.recentMessages.some((m) => m.id === "history-0"),
+    false,
+  );
+  const latest = readConversation(state, sessionId, undefined, 10);
+  assert.equal(latest.messages.length, 10);
+  assert.equal(latest.hasMore, true);
+  assert.equal(latest.nextBeforeMessageId, "history-7");
+  const earlier = readConversation(
+    state,
+    sessionId,
+    latest.nextBeforeMessageId!,
+    10,
+  );
+  assert.equal(earlier.messages.length, 7);
+  assert.equal(earlier.messages[0].id, "history-0");
+  assert.equal(earlier.hasMore, false);
+  assert.equal(earlier.nextBeforeMessageId, null);
+  assert(
+    [...latest.messages, ...earlier.messages].every(
+      (m) => m.sessionId === sessionId,
+    ),
+  );
+  assert.throws(
+    () => readConversation(state, sessionId, "private-other"),
+    /当前会话/,
+  );
+  assert.throws(
+    () => readConversation(state, sessionId, "nonexistent"),
+    /当前会话/,
+  );
 });

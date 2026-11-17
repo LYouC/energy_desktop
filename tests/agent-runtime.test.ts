@@ -7,6 +7,9 @@ import {
   type generateAgentTurn,
 } from "../electron/agent/runtime";
 import { WorkspaceDatabase } from "../electron/storage";
+import { mkdtempSync, rmSync, rmdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const connection = (): Connection => ({
   baseURL: "https://example.invalid/v1",
@@ -27,6 +30,53 @@ function deferred() {
   });
   return { promise, resolve };
 }
+test("会话草拟经SQLite重开恢复，确认后创建并清空草拟", async (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "xixu-agent-memory-"));
+  const filename = path.join(directory, "workspace.db");
+  let db = new WorkspaceDatabase(filename);
+  context.after(() => {
+    db.close();
+    for (const suffix of ["", "-wal", "-shm"])
+      rmSync(filename + suffix, { force: true });
+    rmdirSync(directory);
+  });
+  const sessionId = db.load().activeSessionId;
+  const draft = {
+    title: "整理会议笔记",
+    patch: { goal: "便于检索决定和待办" },
+  };
+  await new AgentRuntime(db, connection, async () => ({
+    ...result,
+    turn: {
+      text: "草拟任务为整理会议笔记",
+      actions: [],
+      memory: { summary: "用户正在确认会议笔记整理任务", taskDraft: draft },
+    },
+  })).send({ ...request("先草拟一下"), sessionId }, () => {});
+  db.close();
+  db = new WorkspaceDatabase(filename);
+  assert.deepEqual(db.load().sessions[0].agentMemory?.taskDraft, draft);
+  await new AgentRuntime(db, connection, async (options) => {
+    assert.deepEqual(options.state.sessions[0].agentMemory?.taskDraft, draft);
+    return {
+      ...result,
+      turn: {
+        text: "已创建整理会议笔记",
+        actions: [
+          {
+            type: "createTask",
+            ...draft,
+            mode: "direct",
+            quote: "好，就这样",
+          },
+        ],
+        memory: { summary: "会议笔记任务已记录", taskDraft: null },
+      },
+    };
+  }).send({ ...request("好，就这样"), sessionId }, () => {});
+  assert.equal(db.load().tasks.length, 1);
+  assert.equal(db.load().sessions[0].agentMemory?.taskDraft, null);
+});
 test("成功runId跨runtime重建仍幂等，复用ID改消息会失败", async () => {
   const db = new WorkspaceDatabase(":memory:");
   const input = { ...request(), sessionId: db.load().activeSessionId };
@@ -132,6 +182,9 @@ test("规划快照忽略展示状态而保留用户明确偏好", () => {
   changed.sessions[0].draft = "草稿";
   assert.equal(planningSnapshot(state), planningSnapshot(changed));
   changed.preferences = "先做报告";
+  assert.notEqual(planningSnapshot(state), planningSnapshot(changed));
+  changed.preferences = state.preferences;
+  changed.sessions[0].agentMemory = { summary: "草拟报告", taskDraft: null };
   assert.notEqual(planningSnapshot(state), planningSnapshot(changed));
   db.close();
 });

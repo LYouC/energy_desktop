@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   newTask,
   taskPatchSchema,
+  agentMemorySchema,
   type State,
   type Proposal,
   type Change,
@@ -11,13 +12,24 @@ import { applyCommand } from "./operations";
 const evidence = {
   quote: z
     .string()
-    .min(1)
-    .describe("当前用户消息中支持本操作的原文，必须逐字引用"),
+    .optional()
+    .describe(
+      "可选的操作依据说明。应用自行绑定本轮真实用户原话，无需重新抄写原文。",
+    ),
   mode: z
     .enum(["direct", "proposal"])
-    .describe("用户明确指令或事实反馈用direct，Agent新增建议用proposal"),
+    .describe(
+      "用户已授权这一项具体变更才用direct，待用户决定的建议用proposal。可用时间等背景条件不代表接受新日程。context保存事实可用direct。",
+    ),
 };
-const existingTask = { taskId: z.string(), ...evidence };
+const existingTask = {
+  taskId: z
+    .string()
+    .describe(
+      "已保存任务的真实id，或同批createTask声明的ref。任务标题不是id，待接受拆分中的子任务尚无真实id。",
+    ),
+  ...evidence,
+};
 const childSchema = z.object({
   title: z.string().min(1),
   goal: z.string().min(1),
@@ -31,7 +43,12 @@ export const agentActionSchema = z.discriminatedUnion("type", [
       .string()
       .optional()
       .describe("本轮新任务的临时引用，后续action.taskId可使用此值"),
-    title: z.string().min(1),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .describe("根据对话自主概括的简洁任务标题"),
     patch: taskPatchSchema,
     ...evidence,
   }),
@@ -62,6 +79,17 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     date: z.iso.date(),
   }),
   z.object({
+    type: z
+      .literal("updateArrangement")
+      .describe(
+        "修改已存在安排的范围，taskId/date必须指向原安排。可选targetTaskId可将同一安排转给子任务或另一任务，源安排原子移除。",
+      ),
+    ...existingTask,
+    date: z.iso.date(),
+    scope: z.string().min(1),
+    targetTaskId: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("stage"),
     ...existingTask,
     date: z.iso.date(),
@@ -83,55 +111,9 @@ export const agentActionSchema = z.discriminatedUnion("type", [
 export const agentTurnSchema = z.object({
   text: z.string().min(1),
   actions: z.array(agentActionSchema).max(20),
+  memory: agentMemorySchema.optional(),
 });
 export type AgentTurn = z.infer<typeof agentTurnSchema>;
-type Action = z.infer<typeof agentActionSchema>;
-
-function hasDirectIntent(action: Action, quote: string) {
-  // 原文证据与动作词只是第二道防线，自然语言授权仍需模型判断和场景评估。
-  // 拒绝、试探和求建议不得升级为直接执行。明确命令不要求重复确认。
-  if (/不要|别再|先不|不想|不接受|拒绝/.test(quote))
-    return action.type === "resolve" && !action.accept;
-  if (/要不要|能不能|是否|建议|考虑|也许|可能|想想/.test(quote)) return false;
-  if (
-    ((action.type === "stage" && action.done) ||
-      (action.type === "updateTask" && action.patch.status === "done")) &&
-    /还没|没有|没做完|未完成|尚未|没能|不能|并未/.test(quote)
-  )
-    return false;
-  if (
-    action.type === "updateTask" &&
-    action.patch.status === "done" &&
-    !/完成|做完|搞定|提交了/.test(quote)
-  )
-    return false;
-  if (
-    action.type === "updateTask" &&
-    action.patch.status === "abandoned" &&
-    !/放弃/.test(quote)
-  )
-    return false;
-  if (
-    action.type === "updateTask" &&
-    action.patch.status === "waiting" &&
-    !/暂停|等待|等.*再/.test(quote)
-  )
-    return false;
-  const verbs: Record<Action["type"], RegExp> = {
-    createTask: /记下|记录|添加|创建|新建|帮我记/,
-    updateTask: /改|更新|设为|完成了|做完了|放弃|暂停|截止|提交|交|重要/,
-    context: /./s,
-    schedule: /安排|改到|移到|放到|放明天|范围|今天做|今天只|按这个|就这样/,
-    unschedule: /取消|移除|今天不做|明天再做|改到|移到/,
-    stage: /完成|搞定|做完|列出来|先到这里|结束/,
-    split: /拆分|拆一下|建子任务|按.*拆|按这个|按你.*来/,
-    resolve:
-      action.type === "resolve" && !action.accept
-        ? /拒绝|不要|不接受|保持|原来/
-        : /接受|按这个|按你.*来|按(?:你|这|刚才).{0,12}拆分|就这样|可以|同意/,
-  };
-  return verbs[action.type].test(quote);
-}
 
 /** 整轮结果在内存中计算，任何一步失败都会丢弃整份新状态。 */
 export function applyAgentTurn(
@@ -146,6 +128,7 @@ export function applyAgentTurn(
     throw new Error("对话不存在。");
   let state = structuredClone(previous);
   const references = new Map<string, string>();
+  const createdTitles = new Set<string>();
   const proposal: Proposal = {
     id: crypto.randomUUID(),
     sessionId,
@@ -153,36 +136,21 @@ export function applyAgentTurn(
     changes: [],
   };
   for (const action of turn.actions) {
-    if (!userText.includes(action.quote))
-      throw new Error("操作缺少本轮用户原文依据，请重新分析。");
-    const quoteIndex = userText.indexOf(action.quote);
-    const preceding = userText.slice(Math.max(0, quoteIndex - 4), quoteIndex);
-    const contextualQuote = /(?:不要|别|不|未|没|还没|没有|尚未)$/.test(
-      preceding,
-    )
-      ? preceding + action.quote
-      : action.quote;
-    if (action.mode === "direct" && !hasDirectIntent(action, contextualQuote))
-      throw new Error(
-        `操作 ${action.type} 的原文「${action.quote}」混有试探、建议或否定，不能直接执行。请为该操作截取独立明确的授权短句，Agent新增建议使用proposal。`,
-      );
+    // 应用已持有本轮真实消息，直接记录来源，避免要求模型重抄原话而误拦操作。
+    // 意图、否定、指代和接受范围均由模型判断，执行层检查结构与业务一致性。
     if (action.type === "createTask") {
       if (action.mode !== "direct")
         throw new Error("创建任务需要用户明确要求记录。");
-      if (
-        action.patch.status &&
-        action.patch.status !== "todo" &&
-        !hasDirectIntent(
-          { ...action, type: "updateTask", taskId: "new" },
-          contextualQuote,
-        )
-      )
-        throw new Error("新任务的进展状态缺少明确依据。");
       const duplicate = state.tasks.find(
         (t) => t.title.trim() === action.title.trim(),
       );
       if (duplicate) throw new Error("同名任务已存在，请关联已有任务再更新。");
-      const task = { ...newTask(), ...action.patch, title: action.title };
+      const task = {
+        ...newTask(),
+        ...action.patch,
+        title: action.title,
+        backgroundSource: userText,
+      };
       if (action.ref) {
         if (
           references.has(action.ref) ||
@@ -192,6 +160,7 @@ export function applyAgentTurn(
         references.set(action.ref, task.id);
       }
       state = applyCommand(state, { type: "saveTask", task });
+      createdTitles.add(task.title);
       continue;
     }
     if (action.type === "resolve") {
@@ -200,19 +169,6 @@ export function applyAgentTurn(
         (p) => p.id === action.proposalId && p.sessionId === sessionId,
       );
       if (!target) throw new Error("只能接受当前对话中明确的方案。");
-      // 明确只接受拆分时，不能把同卡片里的日程也标为接受；即使随后覆盖日程，
-      // 接受记录仍必须反映用户实际授权的范围。
-      if (
-        action.accept &&
-        /拆分|子任务/.test(action.quote) &&
-        !/安排|日程|全部|整份|整个/.test(action.quote) &&
-        target.changes.some(
-          (change) => action.ids.includes(change.id) && change.type !== "split",
-        )
-      )
-        throw new Error(
-          "本项原文只授权拆分，resolve.ids只能包含split变更；用户另行指定的今日范围请单独direct schedule。",
-        );
       state = applyCommand(state, {
         type: "resolve",
         proposalId: target.id,
@@ -221,10 +177,30 @@ export function applyAgentTurn(
       });
       continue;
     }
-    const task = state.tasks.find(
+    const sourceTask = state.tasks.find(
       (t) => t.id === (references.get(action.taskId) ?? action.taskId),
     );
-    if (!task) throw new Error("操作关联的任务不存在。");
+    if (!sourceTask)
+      throw new Error(
+        `操作${action.type}引用的任务${action.taskId}不存在。请使用已保存任务id或本批createTask.ref，本批已声明的ref为${JSON.stringify([...references.keys()])}。待接受拆分尚未建立真实子任务，今日建议可关联父任务并在scope写具体范围。修正引用后保留完整操作重新提交。`,
+      );
+    let task = sourceTask;
+    if (action.type === "updateArrangement") {
+      if (
+        !state.arrangements.some(
+          (item) => item.taskId === sourceTask.id && item.date === action.date,
+        )
+      )
+        throw new Error(
+          "修改安排需要引用已存在的原taskId/date，请核对context.today或readTask。",
+        );
+      const targetId = action.targetTaskId
+        ? (references.get(action.targetTaskId) ?? action.targetTaskId)
+        : sourceTask.id;
+      const target = state.tasks.find((item) => item.id === targetId);
+      if (!target) throw new Error("替换安排的目标任务不存在。");
+      task = target;
+    }
     if (action.type === "context") {
       // 保留事实/暂估/推测标记及本轮来源，纠正后的内容取代旧背景。
       // 背景动作没有目标、截止、完成状态或安排的写权限。
@@ -237,13 +213,42 @@ export function applyAgentTurn(
           ...task,
           background,
           backgroundKind,
-          backgroundSource: action.quote,
+          backgroundSource: userText,
           progress,
           obstacle,
           nextStep,
         },
       });
       continue;
+    }
+    // 模型选择直接落地的拆分若与现有待接受条目完全相同，复用该条目执行，
+    // 让真实子任务与接受记录同步，避免另建一份已接受记录而遗留原卡片。
+    if (action.type === "split" && action.mode === "direct") {
+      const matching = state.proposals
+        .filter((item) => item.sessionId === sessionId)
+        .flatMap((item) =>
+          item.changes
+            .filter(
+              (change) =>
+                change.type === "split" &&
+                change.status === "pending" &&
+                change.taskId === task.id &&
+                change.taskVersion === task.version &&
+                JSON.stringify(change.children) ===
+                  JSON.stringify(action.children),
+            )
+            .map((change) => ({ proposalId: item.id, changeId: change.id })),
+        )
+        .at(-1);
+      if (matching) {
+        state = applyCommand(state, {
+          type: "resolve",
+          proposalId: matching.proposalId,
+          ids: [matching.changeId],
+          accept: true,
+        });
+        continue;
+      }
     }
     const change: Change = {
       id: crypto.randomUUID(),
@@ -253,8 +258,13 @@ export function applyAgentTurn(
         action.type === "split"
           ? `拆分「${task.title}」`
           : `调整「${task.title}」`,
-      reason: `${action.mode === "direct" ? "按用户要求" : "待用户接受的建议"}；依据：${action.quote}`,
-      type: action.type === "updateTask" ? "update" : action.type,
+      reason: `${action.mode === "direct" ? "按用户要求" : "待用户接受的建议"}，本轮原话为${userText}`,
+      type:
+        action.type === "updateTask"
+          ? "update"
+          : action.type === "updateArrangement"
+            ? "schedule"
+            : action.type,
       date: "date" in action ? action.date : "",
       scope: "scope" in action ? action.scope : "",
       children: action.type === "split" ? action.children : [],
@@ -264,6 +274,13 @@ export function applyAgentTurn(
         ? { fromDate: action.fromDate }
         : {}),
       ...(action.type === "stage" ? { done: action.done } : {}),
+      ...(action.type === "updateArrangement"
+        ? {
+            fromTaskId: sourceTask.id,
+            fromTaskVersion: sourceTask.version,
+            fromDate: action.date,
+          }
+        : {}),
     };
     if (action.mode === "proposal") proposal.changes.push(change);
     else {
@@ -283,10 +300,22 @@ export function applyAgentTurn(
     }
   }
   // 先完成本轮事实和已授权操作，再给尚未接受的建议绑定最新任务版本。
-  for (const change of proposal.changes)
+  for (const change of proposal.changes) {
     change.taskVersion = state.tasks.find(
       (t) => t.id === change.taskId,
     )!.version;
+    if (change.fromTaskId)
+      change.fromTaskVersion = state.tasks.find(
+        (task) => task.id === change.fromTaskId,
+      )!.version;
+  }
+  const session = state.sessions.find((item) => item.id === sessionId)!;
+  if (turn.memory) session.agentMemory = turn.memory;
+  const draft = session.agentMemory?.taskDraft;
+  // 创建动作由模型决定；同名草拟已实际落地后，由应用结束其待创建状态。
+  if (draft && createdTitles.has(draft.title.trim())) {
+    session.agentMemory = { ...session.agentMemory!, taskDraft: null };
+  }
   state = applyCommand(state, {
     type: "reply",
     proposal: proposal.changes.length ? proposal : null,

@@ -53,11 +53,11 @@
       <details>
         <summary>查看编排、校验与模块职责</summary>
         <div class="technical">
-          <p><code>ChatPanel.vue</code> 管理输入、运行状态、流式临时展示和会话切换。<code>runtime.ts</code> 在应用内串行运行分析，每轮最多六个模型步骤，整轮超时为一百二十秒。上下文包含时区，以及程序计算的今日、明日、本周五和下周五日期锚点。<code>readTask</code> 查询完整任务、子任务和历史安排。<code>calculateCapacity</code> 调用 <code>shared/capacity.ts</code> 核算可用时间、总估时、缺口及包含缓冲的条件性候选。模型结合优先级与真实交付条件选择建议。<code>submitTurn</code> 提交完整回复与动作，先在内存预演，校验失败会反馈到同一循环供模型修正，校验成功后结束循环。</p>
-          <p><code>shared/agent.ts</code> 把完整工具结果转换成有限业务操作。自然语言意图由模型解释，业务层检查本轮原文匹配、否定或试探表达、动作词和操作范围。原文引用能约束明显无关的操作，但语义判断仍可能出错，需要场景测试与持续评审。</p>
-          <p><code>operations.ts</code> 维护任务关系、完成状态和方案接受规则。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量和偏好的快照。草稿、主题或历史消息的变化可以继续处理，规划快照变化时需要重新分析。<code>storage.ts</code> 在事务内再次检查数据版本，原子提交本轮结果。</p>
+          <p><code>runtime.ts</code> 使用真实对话轮次，每轮最多六个模型步骤，超时一百二十秒。<code>readTask</code> 查询任务，<code>readConversation</code> 查阅当前会话历史，<code>calculateCapacity</code> 核算时间。模型用 <code>prepareTurn</code> 提交交流或操作的语义决定、具体动作与可选记忆。程序预演并返回回执，模型随后生成自然语言终答。本轮完整结果通过一次事务保存。</p>
+          <p><code>shared/agent.ts</code> 把模型选定的动作转换成有限业务操作。创建时机、授权和指代由模型理解，应用绑定真实消息来源，程序检查结构、任务关系、会话归属和版本。模型自行概括标题与背景。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。语义判断通过真实场景持续评审。</p>
+          <p><code>operations.ts</code> 维护任务关系、完成状态和方案接受规则。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量、偏好和会话记忆的快照。<code>storage.ts</code> 在事务内检查数据版本，一次保存本轮操作、记忆与最终回复。</p>
           <p><code>config.ts</code> 管理 HTTPS 服务地址、模型与凭据。设置界面输入的 Key 使用 Electron <code>safeStorage</code> 加密保存，也可从执行进程的环境变量读取。界面查询配置只取得服务地址、模型及是否已配置 Key。更换服务地址时需提供相应凭据。</p>
-          <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。工具调用中间结果用于组织本轮输出，正式业务变更以完整结果校验并提交成功为准。普通文本增量和 <code>submitTurn</code> 参数中可解码的 <code>text</code> 前缀用于流式预览，动作参数等待完整校验。最终结果依据本地保存状态展示。</p>
+          <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。模型先决定操作并读取回执，随后生成的自然语言正文支持流式预览。工具步骤中的文字属于中间过程，正式业务变更与会话记录以事务保存成功为准。</p>
           <p>本页用于解释编排。实际模型能力与各场景的验证结果见项目测试记录，具体行为依据 <a href="产品需求.md">产品需求</a> 和 <a href="Agent场景用例.md">Agent 场景用例</a>。</p>
         </div>
       </details>

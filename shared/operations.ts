@@ -110,7 +110,11 @@ export function applyCommand(previous: State, input: Command): State {
       );
       for (const proposal of state.proposals)
         for (const change of proposal.changes) {
-          if (ids.has(change.taskId) && change.status === "pending")
+          if (
+            (ids.has(change.taskId) ||
+              (change.fromTaskId && ids.has(change.fromTaskId))) &&
+            change.status === "pending"
+          )
             change.status = "rejected";
         }
       break;
@@ -178,13 +182,41 @@ export function applyCommand(previous: State, input: Command): State {
         for (const change of changes) {
           if (findTask(state, change.taskId).version !== change.taskVersion)
             throw new Error("任务已变化，这部分方案需要重新分析。");
+          if (
+            change.fromTaskId &&
+            findTask(state, change.fromTaskId).version !==
+              change.fromTaskVersion
+          )
+            throw new Error("原安排所属任务已变化，这部分方案需要重新分析。");
         }
       }
       for (const change of changes) {
         change.status = command.accept ? "accepted" : "rejected";
         if (!command.accept) continue;
         if (change.type === "schedule") {
-          if (change.fromDate && change.fromDate !== change.date)
+          // 同批较早的变更也可能已移除源安排，实际替换前再次检查，失败整批回滚。
+          if (
+            change.fromTaskId &&
+            !state.arrangements.some(
+              (item) =>
+                item.taskId === change.fromTaskId &&
+                item.date === (change.fromDate ?? change.date),
+            )
+          )
+            throw new Error("原安排已不存在，请重新分析替换范围。");
+          if (
+            change.fromTaskId &&
+            (change.fromTaskId !== change.taskId ||
+              (change.fromDate ?? change.date) !== change.date)
+          ) {
+            const updated = applyCommand(state, {
+              type: "unschedule",
+              taskId: change.fromTaskId,
+              date: change.fromDate ?? change.date,
+            });
+            state.tasks = updated.tasks;
+            state.arrangements = updated.arrangements;
+          } else if (change.fromDate && change.fromDate !== change.date)
             state.arrangements = state.arrangements.filter(
               (item) =>
                 item.taskId !== change.taskId || item.date !== change.fromDate,
@@ -239,16 +271,21 @@ export function applyCommand(previous: State, input: Command): State {
         }
       }
       // Sibling changes in this proposal stay applicable after an accepted part.
-      for (const change of proposal.changes)
-        if (
-          change.status === "pending" &&
-          changes.some(
-            (item) =>
-              item.status === "accepted" && item.taskId === change.taskId,
-          )
-        ) {
+      const affectedTasks = new Set(
+        changes
+          .filter((change) => change.status === "accepted")
+          .flatMap((change) => [
+            change.taskId,
+            ...(change.fromTaskId ? [change.fromTaskId] : []),
+          ]),
+      );
+      for (const change of proposal.changes) {
+        if (change.status !== "pending") continue;
+        if (affectedTasks.has(change.taskId))
           change.taskVersion = findTask(state, change.taskId).version;
-        }
+        if (change.fromTaskId && affectedTasks.has(change.fromTaskId))
+          change.fromTaskVersion = findTask(state, change.fromTaskId).version;
+      }
       break;
     }
     case "energy":

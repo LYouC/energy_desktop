@@ -43,6 +43,16 @@ export const taskPatchSchema = taskSchema
     backgroundSource: true,
   })
   .partial();
+// 会话工作记忆由模型整理。待创建内容仍留在会话里，用户接受后才成为真实任务。
+export const agentMemorySchema = z.object({
+  summary: z.string().max(6000),
+  taskDraft: z
+    .object({
+      title: z.string().trim().min(1).max(200),
+      patch: taskPatchSchema,
+    })
+    .nullable(),
+});
 export const arrangementSchema = z.object({
   taskId: z.string(),
   date: z.string(),
@@ -65,6 +75,8 @@ const changeSchema = z.object({
   status: z.enum(["pending", "accepted", "rejected"]),
   patch: taskPatchSchema.optional(),
   fromDate: z.string().optional(),
+  fromTaskId: z.string().optional(),
+  fromTaskVersion: z.number().int().optional(),
   done: z.boolean().optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
@@ -87,7 +99,12 @@ export const stateSchema = z.object({
   arrangements: z.array(arrangementSchema),
   proposals: z.array(proposalSchema),
   sessions: z.array(
-    z.object({ id: z.string(), title: z.string(), draft: z.string() }),
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      draft: z.string(),
+      agentMemory: agentMemorySchema.optional(),
+    }),
   ),
   activeSessionId: z.string(),
   messages: z.array(

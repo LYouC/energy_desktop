@@ -14,6 +14,7 @@
     "test:desktop": "npm run build && node tests/desktop.smoke.mjs && node tests/review.desktop.mjs && node tests/agent-ui.desktop.mjs",
     "test:agent:live": "node --import tsx tests/agent.live.ts",
     "test:agent:journey": "node --import tsx tests/agent-journey.live.ts",
+    "test:agent:behavior": "node --import tsx tests/agent-behavior.live.ts",
     "format:check": "prettier --check src shared electron tests vite.config.ts",
     "format": "prettier --write src shared electron tests vite.config.ts"
   },

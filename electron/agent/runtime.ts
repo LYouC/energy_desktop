@@ -1,15 +1,40 @@
-﻿import { streamText, tool, stepCountIs } from "ai";
+import { streamText, tool, stepCountIs, type LanguageModel } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import {
-  agentTurnSchema,
+  agentActionSchema,
   applyAgentTurn,
   type AgentTurn,
 } from "../../shared/agent";
-import { buildContext } from "../../shared/context";
-import { type Command, type State } from "../../shared/model";
+import { buildContext, readConversation } from "../../shared/context";
+import {
+  agentMemorySchema,
+  type Command,
+  type State,
+} from "../../shared/model";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "../../shared/capacity";
+
+const decisionSchema = z
+  .object({
+    intent: z
+      .enum(["conversation", "changes"])
+      .describe(
+        "conversation为纯交流，changes包括已授权操作和待接受方案。changes不代表每项都获授权，每项mode单独判断。",
+      ),
+    actions: z.array(agentActionSchema).max(20),
+    memory: agentMemorySchema.optional(),
+  })
+  .refine(
+    (decision) =>
+      decision.intent === "changes"
+        ? decision.actions.length > 0
+        : decision.actions.length === 0,
+    {
+      message:
+        "changes意图必须包含具体业务动作，conversation意图的actions应为空。",
+    },
+  );
 
 export type Connection = { baseURL: string; model: string; apiKey: string };
 export type AgentEvent = {
@@ -22,6 +47,8 @@ export type TurnTrace = {
   inputTokens: number;
   outputTokens: number;
   actions: number;
+  tools?: string[];
+  calls?: { name: string; input: unknown }[];
   validationErrors?: string[];
 };
 
@@ -33,6 +60,9 @@ export function planningSnapshot(state: State) {
     state.proposals,
     state.energy,
     state.preferences,
+    state.sessions
+      .filter((session) => session.agentMemory)
+      .map((session) => [session.id, session.agentMemory]),
   ]);
 }
 
@@ -44,6 +74,7 @@ export async function generateAgentTurn(options: {
   connection: Connection;
   signal: AbortSignal;
   emit: (event: Omit<AgentEvent, "runId">) => void;
+  model?: LanguageModel;
 }): Promise<{ turn: AgentTurn; trace: TurnTrace }> {
   const { state, sessionId, userText, connection, signal, emit } = options;
   const provider = createOpenAICompatible({
@@ -51,7 +82,10 @@ export async function generateAgentTurn(options: {
     baseURL: connection.baseURL,
     apiKey: connection.apiKey,
   });
-  let staged: AgentTurn | undefined;
+  let finalText: string | undefined;
+  let memory: AgentTurn["memory"];
+  let streamFinalReply = false;
+  let prepared: AgentTurn["actions"] | undefined;
   let streamError = false;
   const validationErrors: string[] = [];
   emit({ type: "status", text: "正在结合最新任务与背景分析…" });
@@ -73,10 +107,88 @@ export async function generateAgentTurn(options: {
     thisFriday: dateAt(4 - weekday),
     nextFriday: dateAt(11 - weekday),
   };
+  // 保留真实的user/assistant轮次，让短答自然承接上一轮，而不是把整段对话塞成一条JSON消息。
+  const { recentMessages, ...workspaceContext } = context;
+  const messages = recentMessages.map(({ role, text }) => ({
+    role,
+    content: text,
+  }));
+  if (
+    recentMessages.at(-1)?.role !== "user" ||
+    recentMessages.at(-1)?.text !== userText
+  )
+    messages.push({ role: "user", content: userText });
+  const prepareTurn = tool({
+    description:
+      "结合完整对话判断本轮意图并提交具体决定。纯交流选择conversation且actions为空，用户要求执行或需要展示正式方案时选择changes并提交相应动作。程序执行该决定，随后根据回执自然回复。每轮都需要此决定。",
+    inputSchema: decisionSchema,
+    execute: async ({ intent, actions, memory: nextMemory }) => {
+      if (prepared) throw new Error("本轮决定已准备完成，请根据回执回复。");
+      // 同一SDK循环内预演并返回具体业务结果。最终回复必须基于这份结果。
+      // 所有真实写入仍在最后一次事务中完成，取消不会留下半轮变更。
+      try {
+        const next = applyAgentTurn(state, sessionId, userText, {
+          text: "[等待最终回复]",
+          actions,
+          ...(nextMemory ? { memory: nextMemory } : {}),
+        });
+        const oldTasks = new Map(state.tasks.map((task) => [task.id, task]));
+        const changedTasks = next.tasks.filter(
+          (task) => oldTasks.get(task.id)?.version !== task.version,
+        );
+        prepared = actions;
+        memory = next.sessions.find(
+          (session) => session.id === sessionId,
+        )?.agentMemory;
+        return {
+          validated: true,
+          intent,
+          changesPrepared: actions.length > 0,
+          taskDraft: memory?.taskDraft ?? null,
+          tasks: changedTasks.map(
+            ({ title, goal, deadline, status, progress, nextStep }) => ({
+              title,
+              goal,
+              deadline,
+              status,
+              progress,
+              nextStep,
+            }),
+          ),
+          arrangements: next.arrangements.map(({ taskId, ...arrangement }) => ({
+            ...arrangement,
+            taskTitle: next.tasks.find((task) => task.id === taskId)!.title,
+          })),
+          pendingChanges: next.proposals
+            .filter((proposal) => proposal.sessionId === sessionId)
+            .flatMap((proposal) =>
+              proposal.changes
+                .filter((change) => change.status === "pending")
+                .map(({ label, type, scope }) => ({ label, type, scope })),
+            ),
+        };
+      } catch (error) {
+        validationErrors.push(
+          error instanceof Error ? error.message.slice(0, 300) : "业务校验失败",
+        );
+        throw error;
+      }
+    },
+  });
   const result = streamText({
-    model: provider.chatModel(connection.model),
-    system: agentInstructions,
-    prompt: JSON.stringify({ context, calendar, currentUserMessage: userText }),
+    model: options.model ?? provider.chatModel(connection.model),
+    system:
+      agentInstructions +
+      `\n本轮实际本地日期为${calendar.today}，时区为${context.timezone}。相对日期、今天以及会话记忆中的本轮日期均据此确定。`,
+    messages: [
+      {
+        role: "user",
+        content:
+          "以下JSON是工作区数据，用于理解后续对话。\n" +
+          JSON.stringify({ context: workspaceContext, calendar }),
+      },
+      ...messages,
+    ],
     abortSignal: signal,
     maxRetries: 0,
     maxOutputTokens: 6000,
@@ -86,10 +198,40 @@ export async function generateAgentTurn(options: {
         : undefined,
     // SDK 默认会打印完整 provider 错误。凭据与请求体只留在调用进程内。
     onError: () => {},
-    // SDK 承担唯一工具循环。submitTurn仅暂存，模型没有直接写数据库的工具。
-    stopWhen: [stepCountIs(6), () => staged !== undefined],
+    // SDK承担工具循环，工具仅暂存。含工具调用的步骤不作为最终答复。
+    stopWhen: stepCountIs(6),
+    prepareStep: () => {
+      streamFinalReply = Boolean(prepared);
+      if (streamFinalReply) return { activeTools: [], toolChoice: "none" };
+
+      return {
+        activeTools: [
+          "readConversation",
+          "calculateCapacity",
+          "readTask",
+          "prepareTurn",
+        ],
+      };
+    },
+    onStepEnd: (step) => {
+      if (step.toolCalls.length === 0 && step.text.trim()) {
+        finalText = step.text;
+        if (!streamFinalReply) emit({ type: "text", text: step.text });
+      }
+    },
+    // 每轮先由模型明确本轮意图和动作，避免直接声称完成却跳过工具。
     toolChoice: "required",
     tools: {
+      readConversation: tool({
+        description:
+          "读取当前会话更早的原文。近期消息不足以解释指代、待创建任务或历史决定时使用，按nextBeforeMessageId继续向前翻页。",
+        inputSchema: z.object({
+          beforeMessageId: z.string().optional(),
+          limit: z.number().int().min(1).max(40).default(20),
+        }),
+        execute: async ({ beforeMessageId, limit }) =>
+          readConversation(state, sessionId, beforeMessageId, limit),
+      }),
       calculateCapacity: tool({
         description:
           "规划有明确可用时间和任务估时，先调用此工具核算容量。所有数值单位为分钟，估计仍保留不确定性。",
@@ -108,86 +250,64 @@ export async function generateAgentTurn(options: {
           };
         },
       }),
-      submitTurn: tool({
-        description:
-          "提交完整中文回复和有限业务动作。提问或纯建议使用空actions。一次提交结束本轮。",
-        inputSchema: agentTurnSchema,
-        execute: async (turn) => {
-          if (staged) throw new Error("本轮已提交。");
-          // 在内存预演所有规则，失败会作为工具错误反馈，供同一个循环修正。
-          try {
-            if (
-              /给.{0,5}拆分建议/.test(userText) &&
-              !turn.actions.some((action) => action.type === "split")
-            )
-              throw new Error(
-                "本轮用户同时要求拆分建议，请在本次submitTurn的actions里包含mode:proposal的split，创建父任务和拆分建议需同轮提交，不能只创建任务就结束。",
-              );
-            if (
-              /帮我记下|请记录|添加一个任务/.test(userText) &&
-              !turn.actions.some((action) =>
-                ["createTask", "updateTask", "context"].includes(action.type),
-              )
-            )
-              throw new Error(
-                "用户明确要求记录任务，请提交创建或更新动作，不能只在文字中声称已记录。",
-              );
-            applyAgentTurn(state, sessionId, userText, turn);
-          } catch (error) {
-            validationErrors.push(
-              error instanceof Error
-                ? error.message.slice(0, 300)
-                : "业务校验失败",
-            );
-            throw error;
-          }
-          staged = turn;
-          return { validated: true, actions: turn.actions.length };
-        },
-      }),
+      prepareTurn,
     },
   });
-  const toolInputs = new Map<string, string>();
-  const previews = new Map<string, string>();
   for await (const event of result.fullStream) {
-    if (event.type === "text-delta") emit({ type: "text", text: event.text });
-    if (event.type === "tool-input-start" && event.toolName === "submitTurn")
-      toolInputs.set(event.id, "");
-    if (event.type === "tool-input-delta" && toolInputs.has(event.id)) {
-      const input = toolInputs.get(event.id)! + event.delta;
-      toolInputs.set(event.id, input);
-      // 仅预览JSON中完整可解码的text前缀，动作参数仍须等完整工具校验。
-      const match = /"text"\s*:\s*"((?:[^"\\]|\\.)*)/s.exec(input);
-      if (match)
-        try {
-          const text = JSON.parse('"' + match[1] + '"') as string;
-          const previous = previews.get(event.id) || "";
-          if (text.startsWith(previous) && text.length > previous.length)
-            emit({ type: "text", text: text.slice(previous.length) });
-          previews.set(event.id, text);
-        } catch {}
-    }
+    // 最终回复阶段已关闭工具，文字可以安全流式展示。
+    if (streamFinalReply && event.type === "text-delta")
+      emit({ type: "text", text: event.text });
     if (event.type === "error") streamError = true;
     if (event.type === "tool-error")
       validationErrors.push(String(event.error).slice(0, 1000));
   }
   signal.throwIfAborted();
-  if (streamError || !staged) {
+  if (streamError || !finalText || !prepared) {
     const failure = new Error(
       "模型未生成可应用的完整结果，请重试或明确操作范围。",
     );
     Object.assign(failure, { validationErrors });
     throw failure;
   }
+  // 草拟内容是模型已经生成的结构化数据。确保用户能看到具体对象，
+  // 避免模型只说“草稿已记下”而把标题留在后台。此处仅补充展示，不决定是否创建。
+  const draft = memory?.taskDraft;
+  if (draft && !finalText.includes(draft.title)) {
+    const details = [
+      `待创建任务「${draft.title}」`,
+      draft.patch.goal ? `目标为${draft.patch.goal}` : "",
+      draft.patch.deadline ? `截止日期为${draft.patch.deadline}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const addition = `\n\n${details}`;
+    finalText += addition;
+    emit({ type: "text", text: addition });
+  }
   const usage = await result.totalUsage;
   const steps = await result.steps;
+  const turn: AgentTurn = {
+    text: finalText,
+    actions: prepared ?? [],
+    ...(memory ? { memory } : {}),
+  };
+  applyAgentTurn(state, sessionId, userText, turn);
   return {
-    turn: staged,
+    turn,
     trace: {
       steps: steps.length,
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
-      actions: staged.actions.length,
+      actions: turn.actions.length,
+      tools: steps.flatMap((step) =>
+        step.toolCalls.map((call) => call.toolName),
+      ),
+      calls: steps.flatMap((step) =>
+        step.toolCalls.map((call) => ({
+          name: call.toolName,
+          input: call.input,
+        })),
+      ),
       validationErrors,
     },
   };
