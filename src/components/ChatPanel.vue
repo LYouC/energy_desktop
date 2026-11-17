@@ -393,16 +393,11 @@ onBeforeUnmount(() => {
         </div>
       </header>
       <div ref="scroll" class="chat-scroll" aria-live="polite">
-        <p class="simulation-note">
-          {{
-            mode === "mock"
-              ? "模拟对话 · 用于试操作方案流程"
-              : "Agent 对话 · 结合当前任务协助推进"
-          }}
-        </p>
         <div v-if="!messages.length" class="chat-welcome">
-          <Sparkles :size="24" />
-          <h2>从一件想做的事开始</h2>
+          <div class="chat-welcome-title">
+            <Sparkles :size="22" />
+            <h2>从一件想做的事开始</h2>
+          </div>
           <p>说说目标、已有进展或卡住的地方，我们一起找出现在能做的第一步。</p>
           <Button
             v-if="mode === 'real' && !configured"
@@ -416,7 +411,6 @@ onBeforeUnmount(() => {
           :key="item.id"
           :class="['message', item.role]"
         >
-          <small>{{ item.role === "user" ? "你" : "息序" }}</small>
           <p>{{ item.text }}</p>
           <template
             v-for="proposal in proposals.filter(
@@ -469,11 +463,9 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div v-if="submittedText" class="message user">
-          <small>你</small>
           <p>{{ submittedText }}</p>
         </div>
         <div v-if="streamText" class="message assistant">
-          <small>息序 · 正在生成</small>
           <p>{{ streamText }}</p>
         </div>
         <p v-if="running" class="muted">

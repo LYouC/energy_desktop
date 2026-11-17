@@ -643,41 +643,37 @@ body.chat-resizing .chat-resizer::after {
   flex: 1;
   padding: 20px 23px;
 }
-.simulation-note {
-  color: var(--muted);
-  text-align: center;
-  font-size: 11px;
-  margin-bottom: 25px;
-}
 .chat-welcome {
-  margin-top: 65px;
+  margin-top: 20px;
   color: var(--text);
   line-height: 1.9;
 }
-.chat-welcome h2 {
-  margin: 14px 0 10px;
+.chat-welcome-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--accent);
+}
+.chat-welcome-title h2 {
+  margin: 0;
+  line-height: 1.45;
   color: var(--accent);
 }
 .chat-welcome p {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .message {
-  margin-bottom: 25px;
+  margin-bottom: 18px;
   overflow-wrap: anywhere;
-}
-.message > small {
-  color: var(--muted);
-  font-size: 11px;
 }
 .message > p {
   white-space: pre-wrap;
-  margin-top: 8px;
   color: var(--text);
   line-height: 1.9;
 }
 .message.user {
   margin-left: 20px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border: 1px solid var(--line);
   background: var(--soft);
   border-radius: 11px 11px 3px 11px;
