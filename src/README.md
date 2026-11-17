@@ -1,6 +1,6 @@
 # 工作台
 
-`App.vue` 负责三栏导航、主题和视图组合。`TaskEditor.vue` 编辑任务、背景、进度和安排，`TaskCard.vue` 展示当日范围与子任务。`ChatPanel.vue` 管理真实或模拟对话、流式预览、取消与方案交互，`ModelSettings.vue` 管理模型设置并清空用后的凭据输入。UI 基础采用 shadcn-vue 的源码组件模式，Button 组合 Reka Primitive、CVA 与 cn，弹层采用 Reka Dialog 的焦点管理。
+`App.vue` 负责三栏导航、主题和视图组合，并持有侧栏折叠、对话折叠与对话宽度状态，偏好经 localStorage 持久化。`TaskEditor.vue` 编辑任务、背景、进度和安排，`TaskCard.vue` 展示当日范围与子任务。`ChatPanel.vue` 管理真实或模拟对话、流式预览、取消与方案交互，并提供对话折叠按钮与左缘拖拽条（300–560px，双击恢复默认），`ModelSettings.vue` 管理模型设置并清空用后的凭据输入。UI 基础采用 shadcn-vue 的源码组件模式，Button 组合 Reka Primitive、CVA 与 cn，弹层采用 Reka Dialog 的焦点管理。
 
 Pinia 的 `workspace` 持有业务数据的界面副本，所有写入串行调用受控 IPC。写入失败显示错误并刷新，用户编辑表单保留。SQLite 是持久化来源。
 

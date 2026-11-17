@@ -9,6 +9,8 @@ import {
   Settings,
   Coffee,
   Search,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-vue-next";
 import { useWorkspace } from "./stores/workspace";
 import Button from "./components/ui/button/Button.vue";
@@ -31,6 +33,30 @@ const settingsOpen = ref(false);
 const preferences = ref("");
 const theme = ref<"light" | "dark" | "system">("system");
 const focusId = ref<string | null>(null);
+const sidebarCollapsed = ref(
+  localStorage.getItem("xixu-sidebar-collapsed") === "1",
+);
+const chatCollapsed = ref(localStorage.getItem("xixu-chat-collapsed") === "1");
+const chatWidth = ref<number | null>(
+  Number(localStorage.getItem("xixu-chat-width")) || null,
+);
+watch(sidebarCollapsed, (value) =>
+  localStorage.setItem("xixu-sidebar-collapsed", value ? "1" : "0"),
+);
+watch(chatCollapsed, (value) =>
+  localStorage.setItem("xixu-chat-collapsed", value ? "1" : "0"),
+);
+watch(chatWidth, (value) => {
+  if (value) localStorage.setItem("xixu-chat-width", String(value));
+  else localStorage.removeItem("xixu-chat-width");
+});
+const shellStyle = computed(() => {
+  const style: Record<string, string> = {};
+  if (sidebarCollapsed.value) style["--sidebar-w"] = "var(--sidebar-collapsed)";
+  if (chatWidth.value) style["--chat-w"] = `${chatWidth.value}px`;
+  if (chatCollapsed.value) style["--chat-col"] = "48px";
+  return style;
+});
 const search = ref("");
 const date = ref(localDate());
 const dateTimer = setInterval(() => {
@@ -134,48 +160,79 @@ async function energy(event: Event) {
     <p v-else>正在打开本地工作台…</p>
     <Button v-if="store.error" @click="store.load">重试打开</Button>
   </div>
-  <div v-else class="app-shell">
-    <aside class="sidebar">
+  <div v-else class="app-shell" :style="shellStyle">
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="brand">
         <Sun :size="34" :stroke-width="1.3" />
-        <div><strong>息序</strong><small>小步前行 · 从容生长</small></div>
+        <div v-if="!sidebarCollapsed">
+          <strong>息序</strong><small>小步前行 · 从容生长</small>
+        </div>
       </div>
-      <Button variant="outline" class="new-task" @click="editor = newTask()"
-        ><Plus :size="16" />记下一件事</Button
+      <Button
+        variant="outline"
+        class="new-task"
+        :aria-label="sidebarCollapsed ? '记下一件事' : undefined"
+        :title="sidebarCollapsed ? '记下一件事' : undefined"
+        @click="editor = newTask()"
+        ><Plus :size="16" /><span v-if="!sidebarCollapsed"
+          >记下一件事</span
+        ></Button
       >
       <nav aria-label="主导航">
         <button
           :class="{ active: view === 'today' }"
           :aria-current="view === 'today' ? 'page' : undefined"
+          :aria-label="sidebarCollapsed ? '今日安排' : undefined"
+          :title="sidebarCollapsed ? '今日安排' : undefined"
           @click="view = 'today'"
         >
-          <Sun :size="18" />今日安排<span>{{
-            arrangements.length
-          }}</span></button
+          <Sun :size="18" /><span v-if="!sidebarCollapsed"
+            >今日安排<span>{{ arrangements.length }}</span></span
+          ></button
         ><button
           :class="{ active: view === 'all' }"
           :aria-current="view === 'all' ? 'page' : undefined"
+          :aria-label="sidebarCollapsed ? '所有任务' : undefined"
+          :title="sidebarCollapsed ? '所有任务' : undefined"
           @click="view = 'all'"
         >
-          <ListTodo :size="18" />所有任务<span>{{
-            store.state.tasks.filter((t) => t.status !== "done").length
-          }}</span></button
+          <ListTodo :size="18" /><span v-if="!sidebarCollapsed"
+            >所有任务<span>{{
+              store.state.tasks.filter((t) => t.status !== "done").length
+            }}</span></span
+          ></button
         ><button
           :class="{ active: view === 'completed' }"
           :aria-current="view === 'completed' ? 'page' : undefined"
+          :aria-label="sidebarCollapsed ? '已完成' : undefined"
+          :title="sidebarCollapsed ? '已完成' : undefined"
           @click="view = 'completed'"
         >
-          <CircleCheck :size="18" />已完成
+          <CircleCheck :size="18" /><span v-if="!sidebarCollapsed">已完成</span>
         </button>
       </nav>
       <div class="sidebar-bottom">
-        <p class="quiet-note">
+        <p v-if="!sidebarCollapsed" class="quiet-note">
           <Leaf :size="24" />不必把所有事情，<br />都放进今天。
         </p>
-        <button class="profile" @click="openSettings">
+        <button
+          class="profile"
+          :aria-label="sidebarCollapsed ? '我的空间 本地保存' : undefined"
+          :title="sidebarCollapsed ? '我的空间' : undefined"
+          @click="openSettings"
+        >
           <span class="avatar">息</span
-          ><span>我的空间<small>本地保存</small></span
-          ><Settings :size="18" />
+          ><span v-if="!sidebarCollapsed">我的空间<small>本地保存</small></span
+          ><Settings v-if="!sidebarCollapsed" :size="18" />
+        </button>
+        <button
+          class="collapse-toggle"
+          :aria-label="sidebarCollapsed ? '展开导航' : '收起导航'"
+          :aria-expanded="!sidebarCollapsed"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          <PanelLeftOpen v-if="sidebarCollapsed" :size="17" />
+          <PanelLeftClose v-else :size="17" />
         </button>
       </div>
     </aside>
@@ -316,7 +373,11 @@ async function energy(event: Event) {
         </template>
       </div>
     </main>
-    <ChatPanel :focused-id="focusId || focused" />
+    <ChatPanel
+      v-model:collapsed="chatCollapsed"
+      :focused-id="focusId || focused"
+      @resize="chatWidth = $event"
+    />
     <TaskEditor
       v-if="editor"
       :key="editor.id"
