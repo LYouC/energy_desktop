@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   newTask,
   taskPatchSchema,
+  childTaskSchema,
   agentMemorySchema,
   type State,
   type Proposal,
@@ -19,7 +20,7 @@ const evidence = {
   mode: z
     .enum(["direct", "proposal"])
     .describe(
-      "用户已授权这一项具体变更才用direct，待用户决定的建议用proposal。可用时间等背景条件不代表接受新日程。context保存事实可用direct。",
+      "用户已授权这一项具体变更才用direct，待用户决定的建议用proposal。可用时间等背景条件不代表接受新日程。按用户反馈更新说明可用direct。",
     ),
 };
 const existingTask = {
@@ -30,10 +31,12 @@ const existingTask = {
     ),
   ...evidence,
 };
-const childSchema = z.object({
-  title: z.string().min(1),
-  goal: z.string().min(1),
-});
+// 拒绝旧字段并交给同一工具循环修正，避免将已移除的内容静默丢弃。
+const agentTaskPatchSchema = taskPatchSchema
+  .strict()
+  .describe(
+    "仅填写要修改的名称、状态、预计开始startDate、预计完成expectedDate、说明description、所属任务parentId。日期为YYYY-MM-DD或空字符串，未知可省略。说明为完整新文本，保留仍有效的目标、事实、硬截止和停点。系统维护id/version/updatedAt。",
+  );
 
 // 有限动作协议取代任意 Command 注入。模型不能设置版本、执行状态、能量或主题。
 export const agentActionSchema = z.discriminatedUnion("type", [
@@ -49,22 +52,13 @@ export const agentActionSchema = z.discriminatedUnion("type", [
       .min(1)
       .max(200)
       .describe("根据对话自主概括的简洁任务标题"),
-    patch: taskPatchSchema,
+    patch: agentTaskPatchSchema,
     ...evidence,
   }),
   z.object({
     type: z.literal("updateTask"),
     ...existingTask,
-    patch: taskPatchSchema,
-  }),
-  z.object({
-    type: z.literal("context"),
-    ...existingTask,
-    background: z.string(),
-    backgroundKind: z.enum(["用户事实", "暂估", "推测"]),
-    progress: z.string(),
-    obstacle: z.string(),
-    nextStep: z.string(),
+    patch: agentTaskPatchSchema,
   }),
   z.object({
     type: z.literal("schedule"),
@@ -98,7 +92,7 @@ export const agentActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("split"),
     ...existingTask,
-    children: z.array(childSchema).min(1).max(20),
+    children: z.array(childTaskSchema.strict()).min(1).max(20),
   }),
   z.object({
     type: z.literal("resolve"),
@@ -128,6 +122,12 @@ export function applyAgentTurn(
     throw new Error("对话不存在。");
   let state = structuredClone(previous);
   const references = new Map<string, string>();
+  const taskPatch = (patch: z.infer<typeof taskPatchSchema>) => ({
+    ...patch,
+    ...(patch.parentId
+      ? { parentId: references.get(patch.parentId) ?? patch.parentId }
+      : {}),
+  });
   const createdTitles = new Set<string>();
   const proposal: Proposal = {
     id: crypto.randomUUID(),
@@ -147,9 +147,8 @@ export function applyAgentTurn(
       if (duplicate) throw new Error("同名任务已存在，请关联已有任务再更新。");
       const task = {
         ...newTask(),
-        ...action.patch,
+        ...taskPatch(action.patch),
         title: action.title,
-        backgroundSource: userText,
       };
       if (action.ref) {
         if (
@@ -201,26 +200,6 @@ export function applyAgentTurn(
       if (!target) throw new Error("替换安排的目标任务不存在。");
       task = target;
     }
-    if (action.type === "context") {
-      // 保留事实/暂估/推测标记及本轮来源，纠正后的内容取代旧背景。
-      // 背景动作没有目标、截止、完成状态或安排的写权限。
-      if (action.mode !== "direct") throw new Error("背景补充应来自本轮交流。");
-      const { background, backgroundKind, progress, obstacle, nextStep } =
-        action;
-      state = applyCommand(state, {
-        type: "saveTask",
-        task: {
-          ...task,
-          background,
-          backgroundKind,
-          backgroundSource: userText,
-          progress,
-          obstacle,
-          nextStep,
-        },
-      });
-      continue;
-    }
     // 模型选择直接落地的拆分若与现有待接受条目完全相同，复用该条目执行，
     // 让真实子任务与接受记录同步，避免另建一份已接受记录而遗留原卡片。
     if (action.type === "split" && action.mode === "direct") {
@@ -269,7 +248,9 @@ export function applyAgentTurn(
       scope: "scope" in action ? action.scope : "",
       children: action.type === "split" ? action.children : [],
       status: "pending",
-      ...(action.type === "updateTask" ? { patch: action.patch } : {}),
+      ...(action.type === "updateTask"
+        ? { patch: taskPatch(action.patch) }
+        : {}),
       ...(action.type === "schedule" && action.fromDate
         ? { fromDate: action.fromDate }
         : {}),

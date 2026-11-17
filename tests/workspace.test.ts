@@ -210,7 +210,7 @@ test("同任务方案分批接受及无效接受范围", () => {
     ...proposal.changes[0],
     id: crypto.randomUUID(),
     type: "split",
-    children: [{ title: "第一步", goal: "产出" }],
+    children: [{ title: "第一步", description: "产出" }],
   });
   state = applyCommand(state, { type: "proposal", proposal });
   assert.throws(
@@ -377,8 +377,7 @@ test("选择子任务后启动协助与拆分使用该子任务", () => {
   const child = {
     ...newTask(state.tasks[0].id),
     title: "查找两份资料",
-    nextStep: "打开资料目录",
-    goal: "保存两个来源",
+    description: "保存两个来源，下一步打开资料目录",
   };
   state = applyCommand(state, { type: "saveTask", task: child });
   const start = simulateReply(

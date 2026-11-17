@@ -25,8 +25,7 @@ assert(
 mkdirSync("test-results", { recursive: true });
 let state = emptyState();
 let parentId = "";
-let originalGoal = "";
-let originalDeadline = "";
+let originalExpectedDate = "";
 const rounds: unknown[] = [];
 
 function save() {
@@ -113,8 +112,9 @@ await run(
     const parents = next.tasks.filter((t) => t.parentId === null);
     assert.equal(parents.length, 1);
     parentId = parents[0].id;
-    originalGoal = parents[0].goal;
-    originalDeadline = parents[0].deadline;
+    originalExpectedDate = parents[0].expectedDate;
+    assert.match(parents[0].description, /复盘/);
+    assert.match(parents[0].description, /周五|星期五|2026-\d{2}-\d{2}/);
     assert.equal(next.tasks.length, 1, "建议尚未接受，不能提前建立子任务");
     assert.equal(next.arrangements.length, 0, "建议尚未接受，不能提前安排");
     assert(
@@ -169,8 +169,9 @@ if (parentId) {
       assert.match(today[0].scope, /三个|3个|3 个/);
       assert.match(today[0].scope, /问题/);
       const parent = next.tasks.find((t) => t.id === parentId)!;
-      assert.equal(parent.goal, originalGoal);
-      assert.equal(parent.deadline, originalDeadline);
+      assert.match(parent.description, /复盘/);
+      assert.match(parent.description, /周五|星期五|2026-\d{2}-\d{2}/);
+      assert.equal(parent.expectedDate, originalExpectedDate);
       assert.notEqual(parent.status, "done");
     },
   );
@@ -199,11 +200,7 @@ if (parentId) {
         next.arrangements.some((a) => a.date === localDate() && a.done),
         "本轮三个问题阶段应标记完成",
       );
-      const recorded = next.tasks
-        .map((t) =>
-          [t.background, t.progress, t.obstacle, t.nextStep].join(" "),
-        )
-        .join(" ");
+      const recorded = next.tasks.map((t) => t.description).join(" ");
       assert.match(recorded, /问题/);
       assert.match(recorded, /提纲/);
     },

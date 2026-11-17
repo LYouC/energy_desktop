@@ -21,7 +21,7 @@ async function launch() {
 }
 let { app, page } = await launch();
 try {
-  for (const [title, goal] of [
+  for (const [title, description] of [
     ["完成产品调研报告", "形成可检查的初稿"],
     ["英语练习", "完成一次阅读练习"],
   ]) {
@@ -31,9 +31,9 @@ try {
       .click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("任务名称").fill(title);
-    await dialog.getByLabel("整体目标与完成条件").fill(goal);
-    await dialog.getByLabel("重要性").selectOption("高");
-    await dialog.getByLabel("下一步行动").fill(`打开${title}的材料`);
+    await dialog
+      .getByLabel("说明", { exact: true })
+      .fill(`${description}，下一步打开${title}的材料`);
     await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
     await expect(dialog).not.toBeVisible();
   }
@@ -130,11 +130,13 @@ try {
   await expect(page.locator(".task-list-row")).toHaveCount(0);
   await page.getByRole("button", { name: /今日安排/ }).click();
   await page.setViewportSize({ width: 800, height: 900 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
   await page.screenshot({
     path: "test-results/desktop-narrow.png",
     fullPage: true,

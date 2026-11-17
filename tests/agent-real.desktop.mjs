@@ -51,8 +51,8 @@ try {
   const result = await page.evaluate(() => window.desktop.load());
   expect(result.tasks).toHaveLength(1);
   expect(result.tasks[0].title).toBe("整理验证材料");
-  expect(result.tasks[0].goal).toMatch(/一页.*清单/);
-  expect(result.tasks[0].deadline).toContain("2026-11-27");
+  expect(result.tasks[0].description).toMatch(/一页.*清单/);
+  expect(result.tasks[0].description).toContain("2026-11-27");
   expect(result.arrangements).toHaveLength(0);
   expect(result.messages).toHaveLength(2);
   await page.screenshot({ path: "test-results/agent-real-desktop.png" });

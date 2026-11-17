@@ -13,10 +13,199 @@ function fixture() {
   });
 }
 
+test("Agent按六项属性创建任务，日期不隐式产生每日安排", () => {
+  const initial = emptyState();
+  const next = applyAgentTurn(
+    initial,
+    initial.activeSessionId,
+    "记下报告准备",
+    {
+      text: "已记录",
+      actions: [
+        {
+          type: "createTask",
+          title: "报告准备",
+          mode: "direct",
+          patch: {
+            description: "交付可讨论的初稿，硬截止2026-11-25下午三点",
+            startDate: "2026-11-18",
+            expectedDate: "2026-11-23",
+            status: "doing",
+          },
+        },
+      ],
+    },
+  );
+  assert.equal(next.tasks[0].startDate, "2026-11-18");
+  assert.equal(next.tasks[0].expectedDate, "2026-11-23");
+  assert.equal(next.tasks[0].status, "doing");
+  assert.match(next.tasks[0].description, /硬截止2026-11-25/);
+  assert.deepEqual(next.arrangements, []);
+  assert.deepEqual(
+    Object.keys(next.tasks[0]).sort(),
+    Object.keys(newTask()).sort(),
+  );
+});
+
+test("Agent同轮新建父子任务可用临时引用指定所属任务", () => {
+  const initial = emptyState();
+  const next = applyAgentTurn(
+    initial,
+    initial.activeSessionId,
+    "创建报告及资料整理子任务",
+    {
+      text: "已创建",
+      actions: [
+        {
+          type: "createTask",
+          ref: "report",
+          title: "报告",
+          patch: {},
+          mode: "direct",
+        },
+        {
+          type: "createTask",
+          title: "资料整理",
+          patch: { parentId: "report" },
+          mode: "direct",
+        },
+      ],
+    },
+  );
+  assert.equal(next.tasks[1].parentId, next.tasks[0].id);
+});
+
+test("Agent拆分支持简单子任务和完整属性，非法子任务日期整轮回滚", () => {
+  const state = fixture();
+  const split = {
+    type: "split",
+    taskId: state.tasks[0].id,
+    mode: "direct",
+    children: [
+      { title: "打开材料" },
+      {
+        title: "准备初稿",
+        description: "整理出两页内容",
+        startDate: "2026-11-18",
+        expectedDate: "2026-11-20",
+        status: "doing",
+      },
+    ],
+  };
+  const next = applyAgentTurn(state, state.activeSessionId, "就这样拆", {
+    text: "已拆分",
+    actions: [split],
+  });
+  assert.equal(next.tasks[1].description, "");
+  assert.equal(next.tasks[2].description, "整理出两页内容");
+  assert.equal(next.tasks[2].startDate, "2026-11-18");
+  assert.equal(next.tasks[2].expectedDate, "2026-11-20");
+  assert.equal(next.tasks[2].status, "doing");
+  assert.equal(next.tasks[2].parentId, state.tasks[0].id);
+  const before = structuredClone(state);
+  assert.throws(
+    () =>
+      applyAgentTurn(state, state.activeSessionId, "拆分", {
+        text: "拆分",
+        actions: [
+          {
+            ...split,
+            children: [
+              split.children[0],
+              { ...split.children[1], expectedDate: "2026-11-17" },
+            ],
+          },
+        ],
+      }),
+    /完成日期不能早于/,
+  );
+  assert.deepEqual(state, before);
+});
+
+test("Agent动作与草稿拒绝旧字段，历史拆分读取时保留旧目标内容", () => {
+  for (const field of [
+    "goal",
+    "deadline",
+    "plannedDate",
+    "importance",
+    "background",
+    "dependencies",
+  ]) {
+    assert.equal(
+      agentTurnSchema.safeParse({
+        text: "记录",
+        actions: [
+          {
+            type: "createTask",
+            title: "任务",
+            patch: { [field]: "旧值" },
+            mode: "direct",
+          },
+        ],
+      }).success,
+      false,
+    );
+  }
+  assert.equal(
+    agentTurnSchema.safeParse({
+      text: "交流",
+      actions: [],
+      memory: {
+        summary: "",
+        taskDraft: { title: "旧草稿", patch: { goal: "旧目标" } },
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    agentTurnSchema.safeParse({ text: "更新", actions: [{ type: "context" }] })
+      .success,
+    false,
+  );
+  const state = fixture();
+  const restored = stateSchema.parse({
+    ...state,
+    proposals: [
+      {
+        id: "legacy",
+        sessionId: state.activeSessionId,
+        createdAt: new Date().toISOString(),
+        changes: [
+          {
+            id: "split",
+            taskId: state.tasks[0].id,
+            taskVersion: state.tasks[0].version,
+            type: "split",
+            label: "旧拆分",
+            reason: "历史",
+            date: "",
+            scope: "",
+            status: "pending",
+            children: [{ title: "朗读", goal: "读一页" }],
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(
+    restored.proposals[0].changes[0].children[0].description,
+    "读一页",
+  );
+  const accepted = applyCommand(restored, {
+    type: "resolve",
+    proposalId: "legacy",
+    ids: ["split"],
+    accept: true,
+  });
+  assert.equal(accepted.tasks[1].description, "读一页");
+});
+
 test("直接采用相同拆分会接受原方案且重试不重复子任务", () => {
   const initial = fixture();
   const taskId = initial.tasks[0].id;
-  const children = [{ title: "朗读一页", goal: "朗读完整一页并标记生词" }];
+  const children = [
+    { title: "朗读一页", description: "朗读完整一页并标记生词" },
+  ];
   const proposed = applyAgentTurn(
     initial,
     initial.activeSessionId,
@@ -88,11 +277,8 @@ test("更新安排直接父转子原子替换且不重复计算今日工作", ()
   assert.equal(next.arrangements.length, 1);
   assert.equal(next.arrangements[0].taskId, childId);
   assert.equal(next.arrangements[0].scope, "列三个讨论问题");
-  assert.equal(next.tasks.find((t) => t.id === parentId)?.plannedDate, "");
-  assert.equal(
-    next.tasks.find((t) => t.id === childId)?.plannedDate,
-    "2026-11-17",
-  );
+  assert.equal(next.tasks.find((t) => t.id === parentId)?.startDate, "");
+  assert.equal(next.tasks.find((t) => t.id === childId)?.startDate, "");
   assert.equal(state.arrangements[0].taskId, parentId);
 });
 
@@ -151,7 +337,7 @@ test("源安排所属任务变化后拒绝旧替换方案并保留完整状态",
     type: "saveTask",
     task: {
       ...state.tasks.find((t) => t.id === parentId)!,
-      goal: "用户修正后的目标",
+      description: "用户修正后的目标",
     },
   });
   const before = structuredClone(state);
@@ -299,7 +485,7 @@ test("模型用具体变更ID表达自然确认的接受范围", () => {
         {
           type: "split",
           taskId: initial.tasks[0].id,
-          children: [{ title: "提纲", goal: "列出讨论问题" }],
+          children: [{ title: "提纲", description: "列出讨论问题" }],
           mode: "proposal",
           quote: "给拆分建议",
         },
@@ -366,14 +552,14 @@ test("建立任务与待接受拆分可同轮提交，引用由应用分配", ()
           type: "createTask",
           title: "报告",
           ref: "new-report",
-          patch: { goal: "提交报告" },
+          patch: { description: "提交报告" },
           mode: "direct",
           quote: "记下报告",
         },
         {
           type: "split",
           taskId: "new-report",
-          children: [{ title: "提纲", goal: "列出讨论问题" }],
+          children: [{ title: "提纲", description: "列出讨论问题" }],
           mode: "proposal",
           quote: "给个拆分建议",
         },
@@ -412,27 +598,24 @@ test("移动安排直接生效且不会保留旧日重复安排", () => {
     ["2026-11-17"],
   );
 });
-test("事实背景有来源，不能通过context偷偷改截止", () => {
+test("说明更新保存停点，预计日期与安排独立", () => {
   const state = fixture();
   const next = applyAgentTurn(state, state.activeSessionId, "没拿到材料", {
     text: "记下了",
     actions: [
       {
-        type: "context",
+        type: "updateTask",
         taskId: state.tasks[0].id,
-        background: "缺少材料",
-        backgroundKind: "用户事实",
-        progress: "",
-        obstacle: "没拿到材料",
-        nextStep: "询问材料",
-        deadline: "2026-11-17",
+        patch: { description: "缺少材料，下一步询问材料" },
         mode: "direct",
         quote: "没拿到材料",
       },
     ],
   });
-  assert.equal(next.tasks[0].deadline, "");
-  assert.equal(next.tasks[0].backgroundSource, "没拿到材料");
+  assert.equal(next.tasks[0].startDate, "");
+  assert.equal(next.tasks[0].expectedDate, "");
+  assert.equal(next.tasks[0].description, "缺少材料，下一步询问材料");
+  assert.deepEqual(next.arrangements, state.arrangements);
 });
 test("模型判断为讨论或否定时空动作保留任务与安排", () => {
   const state = fixture();
@@ -480,7 +663,7 @@ test("不能跨会话接受方案，接受重试只生效一次", () => {
       {
         type: "split",
         taskId: state.tasks[0].id,
-        children: [{ title: "朗读", goal: "读一页" }],
+        children: [{ title: "朗读", description: "读一页" }],
         mode: "proposal",
         quote: "建议怎么拆分",
       },
@@ -608,7 +791,7 @@ test("动作协议排除能量及任意命令", () => {
   );
 });
 
-test("自然确认可采用模型整理的标题，真实来源由应用绑定", () => {
+test("自然确认可采用模型整理的标题与说明", () => {
   const state = fixture();
   const next = applyAgentTurn(state, state.activeSessionId, "好，就建这个", {
     text: "已建立任务",
@@ -616,13 +799,13 @@ test("自然确认可采用模型整理的标题，真实来源由应用绑定",
       {
         type: "createTask",
         title: "整理项目复盘材料",
-        patch: { goal: "整理出用于项目复盘的材料目录" },
+        patch: { description: "整理出用于项目复盘的材料目录" },
         mode: "direct",
         quote: "模型对多轮交流的概括",
       },
     ],
   });
-  assert.equal(next.tasks.at(-1)?.backgroundSource, "好，就建这个");
+  assert.equal(next.tasks.at(-1)?.description, "整理出用于项目复盘的材料目录");
   assert.equal(next.tasks.at(-1)?.title, "整理项目复盘材料");
   assert.equal(next.tasks.at(-1)?.status, "todo");
   assert.equal(state.tasks.length, 1);
@@ -639,7 +822,10 @@ test("草拟任务随会话持久化，自然确认创建后可清除草稿", ()
       actions: [],
       memory: {
         summary: "用户想整理项目复盘材料，正在确认任务范围",
-        taskDraft: { title: "整理复盘材料", patch: { goal: "整理出材料目录" } },
+        taskDraft: {
+          title: "整理复盘材料",
+          patch: { description: "整理出材料目录" },
+        },
       },
     },
   );
@@ -659,7 +845,7 @@ test("草拟任务随会话持久化，自然确认创建后可清除草稿", ()
         {
           type: "createTask",
           title: "整理复盘材料",
-          patch: { goal: "整理出材料目录" },
+          patch: { description: "整理出材料目录" },
           mode: "direct",
           quote: "好，就建这个",
         },

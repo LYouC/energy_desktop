@@ -152,7 +152,7 @@ await run(
   (_before, next) => {
     assert.equal(next.tasks.length, 1);
     assert(next.tasks[0].title.length < 100);
-    assert(next.tasks[0].goal.length > 0);
+    assert(next.tasks[0].description.length > 0);
     assert.equal(next.arrangements.length, 0);
   },
 );
@@ -191,7 +191,7 @@ await run(
     const draft = before.sessions[0].agentMemory?.taskDraft;
     if (draft) assert.equal(next.tasks[0].title, draft.title);
     if (draft) assert.equal(next.sessions[0].agentMemory?.taskDraft, null);
-    assert(next.tasks[0].goal.trim().length > 0);
+    assert(next.tasks[0].description.trim().length > 0);
     assert(
       before.messages.some(
         (message) =>
@@ -232,10 +232,7 @@ corrected = applyCommand(corrected, {
   task: {
     ...newTask(),
     title: "客户方案演示",
-    goal: "准备方案演示",
-    deadline: "2026-12-04",
-    background: "面向内部同事",
-    backgroundKind: "用户事实",
+    description: "准备方案演示，硬截止为2026-12-04，面向内部同事",
   },
 });
 await run(
@@ -249,7 +246,9 @@ await run(
   (before, next) => {
     assert.equal(next.tasks.length, 1);
     assert.equal(next.tasks[0].id, before.tasks[0].id);
-    assert.equal(next.tasks[0].deadline, "2026-12-03");
+    assert.match(next.tasks[0].description, /2026-12-03/);
+    assert.match(next.tasks[0].description, /客户/);
+    assert(!next.tasks[0].description.includes("2026-12-04"));
     assert.equal(next.arrangements.length, 0);
   },
 );
@@ -257,7 +256,11 @@ await run(
 let history = emptyState();
 history = applyCommand(history, {
   type: "saveTask",
-  task: { ...newTask(), title: "团队周会总结", goal: "形成团队周会总结" },
+  task: {
+    ...newTask(),
+    title: "团队周会总结",
+    description: "形成团队周会总结",
+  },
 });
 history = message(
   history,
@@ -295,7 +298,7 @@ await run(
 let accepted = emptyState();
 accepted = applyCommand(accepted, {
   type: "saveTask",
-  task: { ...newTask(), title: "英语", goal: "面试练习" },
+  task: { ...newTask(), title: "英语", description: "面试练习" },
 });
 accepted = applyAgentTurn(
   accepted,

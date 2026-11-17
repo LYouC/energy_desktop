@@ -86,9 +86,81 @@ try {
     (await page.evaluate(() => window.desktop.load())).sessions,
   ).toHaveLength(2);
   await page.screenshot({ path: "test-results/agent-new-session.png" });
+
+  // 新字段需要在待接受方案中可见，并通过同一个接受入口写入任务。
+  await page.evaluate(async () => {
+    let state = await window.desktop.load();
+    const taskId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    state = await window.desktop.execute(state.revision, {
+      type: "saveTask",
+      task: {
+        id: taskId,
+        version: 0,
+        title: "字段方案验证",
+        description: "",
+        startDate: "",
+        expectedDate: "",
+        status: "todo",
+        parentId: null,
+        updatedAt: now,
+      },
+    });
+    const proposalId = crypto.randomUUID();
+    await window.desktop.execute(state.revision, {
+      type: "reply",
+      message: {
+        id: crypto.randomUUID(),
+        sessionId: state.activeSessionId,
+        role: "assistant",
+        text: "建议补充以下信息。",
+        createdAt: now,
+        proposalId,
+      },
+      proposal: {
+        id: proposalId,
+        sessionId: state.activeSessionId,
+        createdAt: now,
+        changes: [
+          {
+            id: crypto.randomUUID(),
+            taskId,
+            taskVersion: state.tasks.find((task) => task.id === taskId).version,
+            type: "update",
+            label: "补充任务信息",
+            reason: "固定测试方案",
+            date: "",
+            scope: "",
+            children: [],
+            status: "pending",
+            patch: {
+              startDate: "2026-11-19",
+              expectedDate: "2026-11-21",
+              description: "保留目标和硬截止",
+            },
+          },
+        ],
+      },
+    });
+  });
+  await page.reload();
+  await expect(page.locator(".proposal")).toContainText("预计开始：2026-11-19");
+  await expect(page.locator(".proposal")).toContainText("预计完成：2026-11-21");
+  await expect(page.locator(".proposal")).toContainText(
+    "说明：保留目标和硬截止",
+  );
+  expect(
+    (await page.evaluate(() => window.desktop.load())).tasks[0].description,
+  ).toBe("");
+  await page.getByRole("button", { name: "接受这项", exact: true }).click();
+  const applied = await page.evaluate(() => window.desktop.load());
+  expect(applied.tasks[0].description).toBe("保留目标和硬截止");
+  expect(applied.tasks[0].startDate).toBe("2026-11-19");
+  expect(applied.tasks[0].expectedDate).toBe("2026-11-21");
+  expect(applied.arrangements).toHaveLength(0);
   expect(errors).toEqual([]);
   console.log(
-    "PASS: no-key entry, secret input clearing, public config, stream preview, cancellation, session switch; no model requests",
+    "PASS: no-key entry, secret input clearing, public config, stream preview, cancellation, session switch, new-field proposal display and acceptance; no model requests",
   );
 } finally {
   await app.close();

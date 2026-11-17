@@ -30,18 +30,10 @@ try {
       title,
       parentId,
       version: 0,
-      goal: "留下可以检查的阶段产出",
-      deadline: "",
-      plannedDate: "",
+      description: `留下可以检查的阶段产出，用户明确提供的背景，下一步先打开${title}的材料`,
+      startDate: "",
       expectedDate: "",
-      importance: "高",
       status: "todo",
-      dependencies: [],
-      background: "用户明确提供的背景",
-      backgroundKind: "用户事实",
-      progress: "",
-      obstacle: "",
-      nextStep: `先打开${title}的材料`,
       updatedAt: new Date().toISOString(),
     });
     const apply = async (command) => {
@@ -97,6 +89,7 @@ try {
       const date = new Date();
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     });
+    await page.getByText("安排一次推进", { exact: true }).click();
     await page.getByLabel("推进日期").fill(today);
     await expect(page.getByLabel("本次阶段目标")).toHaveValue("今天整理资料");
     checks.push(`${theme}切换已有安排日期后正确显示当日范围`);
@@ -124,7 +117,7 @@ try {
         ".quiet-note",
         ".profile small",
         ".energy .eyebrow",
-        ".message.user small",
+        ".chat-header > span",
         ".message.user p",
       ];
       function luminance(color) {

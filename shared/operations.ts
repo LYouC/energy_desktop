@@ -240,13 +240,14 @@ export function applyCommand(previous: State, input: Command): State {
         } else {
           const parent = findTask(state, change.taskId);
           for (const child of change.children) {
-            state.tasks.push({
+            const task = {
               ...newTask(parent.id),
-              title: child.title,
-              description: child.goal,
+              ...child,
               version: 1,
               updatedAt: now,
-            });
+            };
+            checkDates(task);
+            state.tasks.push(task);
           }
           parent.version++;
         }

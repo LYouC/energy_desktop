@@ -43,7 +43,7 @@ test("会话草拟经SQLite重开恢复，确认后创建并清空草拟", async
   const sessionId = db.load().activeSessionId;
   const draft = {
     title: "整理会议笔记",
-    patch: { goal: "便于检索决定和待办" },
+    patch: { description: "便于检索决定和待办" },
   };
   await new AgentRuntime(db, connection, async () => ({
     ...result,

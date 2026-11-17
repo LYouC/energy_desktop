@@ -145,14 +145,24 @@ export async function generateAgentTurn(options: {
           intent,
           changesPrepared: actions.length > 0,
           taskDraft: memory?.taskDraft ?? null,
+          // 新任务 ID 在预演与最终提交时分别分配，回执用名称表达归属，
+          // 避免模型把预演 ID 记成后续会话可调用的真实 ID。
           tasks: changedTasks.map(
-            ({ title, goal, deadline, status, progress, nextStep }) => ({
+            ({
               title,
-              goal,
-              deadline,
               status,
-              progress,
-              nextStep,
+              startDate,
+              expectedDate,
+              description,
+              parentId,
+            }) => ({
+              title,
+              status,
+              startDate,
+              expectedDate,
+              description,
+              parentTitle:
+                next.tasks.find((task) => task.id === parentId)?.title ?? null,
             }),
           ),
           arrangements: next.arrangements.map(({ taskId, ...arrangement }) => ({
@@ -239,7 +249,8 @@ export async function generateAgentTurn(options: {
         execute: async (input) => calculateCapacity(input),
       }),
       readTask: tool({
-        description: "按任务ID查看完整任务、子任务与历史安排。",
+        description:
+          "按任务ID查看名称、状态、预计起止日期、完整说明、所属任务、子任务与历史安排。更新说明前核实旧内容，合并仍有效的事实与要求。",
         inputSchema: z.object({ taskId: z.string() }),
         execute: async ({ taskId }) => {
           emit({ type: "status", text: "正在查看相关任务背景…" });
@@ -262,7 +273,12 @@ export async function generateAgentTurn(options: {
       validationErrors.push(String(event.error).slice(0, 1000));
   }
   signal.throwIfAborted();
-  if (streamError || !finalText || !prepared) {
+  // 部分模型在关闭工具后仍把补充动作输出成 DSML 正文，这些动作没有执行。
+  // 将整轮判为不完整，避免保存缺字段的任务。工具执行只接受正式工具通道。
+  const malformedReply = /<[|｜]DSML[|｜]\s*(?:calls|invoke|parameter)\b/u.test(
+    finalText ?? "",
+  );
+  if (streamError || !finalText || !prepared || malformedReply) {
     const failure = new Error(
       "模型未生成可应用的完整结果，请重试或明确操作范围。",
     );
@@ -275,8 +291,9 @@ export async function generateAgentTurn(options: {
   if (draft && !finalText.includes(draft.title)) {
     const details = [
       `待创建任务「${draft.title}」`,
-      draft.patch.goal ? `目标为${draft.patch.goal}` : "",
-      draft.patch.deadline ? `截止日期为${draft.patch.deadline}` : "",
+      draft.patch.description ? `说明为${draft.patch.description}` : "",
+      draft.patch.startDate ? `预计开始为${draft.patch.startDate}` : "",
+      draft.patch.expectedDate ? `预计完成为${draft.patch.expectedDate}` : "",
     ]
       .filter(Boolean)
       .join("\n");

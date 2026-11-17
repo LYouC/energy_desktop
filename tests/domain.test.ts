@@ -154,7 +154,7 @@ test("重复变更 ID 不会重复创建子任务", () => {
     {
       ...proposal.changes[0],
       type: "split",
-      children: [{ title: "子任务", goal: "完成条件" }],
+      children: [{ title: "子任务", description: "完成条件" }],
     },
   ];
   state = applyCommand(state, { type: "proposal", proposal });

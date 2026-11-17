@@ -286,19 +286,11 @@ function changeSummary(change: Change) {
     return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}`;
   const fields: Record<string, string> = {
     title: "名称",
-    goal: "目标",
-    deadline: "真实截止",
-    plannedDate: "推进日期",
-    expectedDate: "预期完成",
-    importance: "重要性",
     status: "状态",
-    background: "背景",
-    backgroundKind: "背景来源",
-    progress: "进展",
-    obstacle: "阻力",
-    nextStep: "下一步",
-    parentId: "父任务",
-    dependencies: "依赖",
+    startDate: "预计开始",
+    expectedDate: "预计完成",
+    description: "说明",
+    parentId: "所属任务",
   };
   return Object.entries(change.patch ?? {})
     .filter(([key]) => fields[key])

@@ -50,7 +50,11 @@ function response(
 const action = {
   type: "createTask",
   title: "整理会议笔记",
-  patch: { goal: "方便检索决定和待办" },
+  patch: {
+    description: "方便检索决定和待办",
+    startDate: "2026-11-18",
+    expectedDate: "2026-11-20",
+  },
   mode: "direct",
   quote: "好，就建这个",
 };
@@ -65,6 +69,38 @@ const connection = {
 };
 const finalText = "已创建整理会议笔记任务，目标是方便检索决定和待办。";
 
+test("最终正文中的DSML补充操作使整轮失败，不能提交缺字段任务", async () => {
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      calls++;
+      return calls === 1
+        ? response([prepare])
+        : response(
+            [],
+            '<｜DSML｜ calls><｜DSML｜ invoke name="prepareTurn">补充说明和日期</｜DSML｜ invoke></｜DSML｜ calls>',
+          );
+    },
+  });
+  const state = emptyState();
+  await assert.rejects(
+    generateAgentTurn({
+      state,
+      sessionId: state.activeSessionId,
+      focusedId: null,
+      userText: "按已有信息创建",
+      connection,
+      model,
+      signal: AbortSignal.timeout(10000),
+      emit: () => {},
+    }),
+    /模型未生成可应用的完整结果/,
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(state.tasks, []);
+  assert.deepEqual(state.messages, []);
+});
+
 for (const replyFirst of [true, false]) {
   test(`同一步${replyFirst ? "先文字" : "先工具"}时，读回执后才产生最终回复`, async () => {
     let calls = 0;
@@ -76,6 +112,12 @@ for (const replyFirst of [true, false]) {
           return response([prepare], "尚未读取回执的文字", replyFirst);
         assert.equal(calls, 2);
         assert(JSON.stringify(options.prompt).includes("方便检索决定和待办"));
+        const receipts = options.prompt.filter((item) => item.role === "tool");
+        const serialized = JSON.stringify(receipts);
+        assert(serialized.includes("startDate"));
+        assert(serialized.includes("expectedDate"));
+        assert(!serialized.includes('"goal"'));
+        assert(!serialized.includes('"deadline"'));
         assert.equal(options.tools?.length ?? 0, 0);
         return response([], finalText);
       },
@@ -103,7 +145,7 @@ for (const replyFirst of [true, false]) {
       "好，就建这个",
       result.turn,
     );
-    assert.equal(next.tasks[0].goal, "方便检索决定和待办");
+    assert.equal(next.tasks[0].description, "方便检索决定和待办");
   });
 }
 
@@ -278,6 +320,8 @@ test("模型只说草稿已保存时，用户仍能看到模型草拟的实际�
     emit: () => {},
   });
   assert(result.turn.text.includes(action.title));
-  assert(result.turn.text.includes(action.patch.goal));
+  assert(result.turn.text.includes(action.patch.description));
+  assert(result.turn.text.includes(action.patch.startDate));
+  assert(result.turn.text.includes(action.patch.expectedDate));
   assert.equal(result.turn.actions.length, 0);
 });

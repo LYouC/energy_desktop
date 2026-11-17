@@ -17,9 +17,17 @@ export const taskSchema = z.object({
   id: z.string(),
   version: z.number().int(),
   title: z.string().trim().min(1).max(200),
-  description: z.string(),
-  startDate: z.string(),
-  expectedDate: z.string(),
+  description: z
+    .string()
+    .describe(
+      "该任务自身的说明，按需保留目标、背景、进展、停点、硬截止和前提。",
+    ),
+  startDate: z
+    .string()
+    .describe("该任务自身的预计开始日期，YYYY-MM-DD，未知用空字符串。"),
+  expectedDate: z
+    .string()
+    .describe("该任务自身的预计完成日期，YYYY-MM-DD，未知用空字符串。"),
   status: z.enum(["todo", "doing", "waiting", "done", "abandoned"]),
   parentId: z.string().nullable(),
   updatedAt: z.string(),
@@ -33,13 +41,18 @@ export const taskPatchSchema = taskSchema
     updatedAt: true,
   })
   .partial();
+// 拆分只固定所属父任务，其余属性与普通任务一致，简单子任务仅需名称。
+export const childTaskSchema = taskPatchSchema.omit({ parentId: true }).extend({
+  title: taskSchema.shape.title,
+  description: taskSchema.shape.description.default(""),
+});
 // 会话工作记忆由模型整理。待创建内容仍留在会话里，用户接受后才成为真实任务。
 export const agentMemorySchema = z.object({
   summary: z.string().max(6000),
   taskDraft: z
     .object({
       title: z.string().trim().min(1).max(200),
-      patch: taskPatchSchema,
+      patch: taskPatchSchema.strict(),
     })
     .nullable(),
 });
@@ -59,8 +72,14 @@ const changeSchema = z.object({
   type: z.enum(["schedule", "split", "update", "unschedule", "stage"]),
   date: z.string(),
   scope: z.string(),
+  // 读取已经保存的旧拆分时，将 goal 归入说明。模型工具只暴露新字段。
   children: z.array(
-    z.object({ title: z.string().min(1), goal: z.string().min(1) }),
+    childTaskSchema
+      .extend({ goal: z.string().optional() })
+      .transform(({ goal, ...child }) => ({
+        ...child,
+        description: child.description || goal || "",
+      })),
   ),
   status: z.enum(["pending", "accepted", "rejected"]),
   patch: taskPatchSchema.optional(),

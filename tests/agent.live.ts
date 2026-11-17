@@ -102,7 +102,7 @@ state = await run(
   },
 );
 const basic = emptyState();
-const task = { ...newTask(), title: "英语", goal: "完成面试英语练习" };
+const task = { ...newTask(), title: "英语", description: "完成面试英语练习" };
 let planned = applyCommand(basic, {
   type: "saveTask",
   task,
