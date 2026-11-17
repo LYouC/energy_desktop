@@ -5,6 +5,7 @@ import {
   type Task,
   type Command,
   type Proposal,
+  newTask,
 } from "./model";
 import { z } from "zod";
 
@@ -15,25 +16,21 @@ function findTask(state: State, id: string) {
 }
 function checkRelations(tasks: Task[]) {
   for (const task of tasks) {
-    const visit = (
-      id: string,
-      path: Set<string>,
-      kind: "parent" | "dependency",
-    ) => {
-      if (path.has(id)) throw new Error("父子关系或依赖形成了循环。");
+    const visit = (id: string, path: Set<string>) => {
+      if (path.has(id)) throw new Error("父子关系形成了循环。");
       const current = tasks.find((item) => item.id === id);
       if (!current) throw new Error("关联任务不存在。");
-      const next =
-        kind === "parent"
-          ? current.parentId
-            ? [current.parentId]
-            : []
-          : current.dependencies;
-      for (const target of next) visit(target, new Set([...path, id]), kind);
+      if (current.parentId) visit(current.parentId, new Set([...path, id]));
     };
-    visit(task.id, new Set(), "parent");
-    visit(task.id, new Set(), "dependency");
+    visit(task.id, new Set());
   }
+}
+function checkDates(task: Task) {
+  for (const date of [task.startDate, task.expectedDate])
+    if (date && !z.iso.date().safeParse(date).success)
+      throw new Error("请选择有效的任务日期。");
+  if (task.startDate && task.expectedDate && task.startDate > task.expectedDate)
+    throw new Error("预计完成日期不能早于预计开始日期。");
 }
 function schedule(state: State, taskId: string, date: string, scope: string) {
   const task = findTask(state, taskId);
@@ -48,7 +45,6 @@ function schedule(state: State, taskId: string, date: string, scope: string) {
     existing.scope = scope;
     existing.done = false;
   } else state.arrangements.push({ taskId, date, scope, done: false });
-  task.plannedDate = date;
   task.version++;
 }
 function addProposal(state: State, proposal: Proposal) {
@@ -79,6 +75,7 @@ export function applyCommand(previous: State, input: Command): State {
         version: (old?.version ?? 0) + 1,
         updatedAt: now,
       };
+      checkDates(task);
       if (old) state.tasks[state.tasks.indexOf(old)] = task;
       else state.tasks.push(task);
       checkRelations(state.tasks);
@@ -99,12 +96,6 @@ export function applyCommand(previous: State, input: Command): State {
           if (task.parentId && ids.has(task.parentId)) ids.add(task.id);
       }
       state.tasks = state.tasks.filter((task) => !ids.has(task.id));
-      for (const task of state.tasks) {
-        if (task.dependencies.some((id) => ids.has(id))) {
-          task.dependencies = task.dependencies.filter((id) => !ids.has(id));
-          task.version++;
-        }
-      }
       state.arrangements = state.arrangements.filter(
         (item) => !ids.has(item.taskId),
       );
@@ -127,9 +118,6 @@ export function applyCommand(previous: State, input: Command): State {
         (item) => item.taskId !== command.taskId || item.date !== command.date,
       );
       const task = findTask(state, command.taskId);
-      task.plannedDate =
-        state.arrangements.filter((item) => item.taskId === task.id).at(-1)
-          ?.date ?? "";
       task.version++;
       break;
     }
@@ -229,6 +217,7 @@ export function applyCommand(previous: State, input: Command): State {
             version: task.version + 1,
             updatedAt: now,
           });
+          checkDates(task);
           checkRelations(state.tasks);
         } else if (change.type === "unschedule") {
           const updated = applyCommand(state, {
@@ -252,18 +241,10 @@ export function applyCommand(previous: State, input: Command): State {
           const parent = findTask(state, change.taskId);
           for (const child of change.children) {
             state.tasks.push({
-              ...parent,
-              ...child,
-              id: crypto.randomUUID(),
-              parentId: parent.id,
+              ...newTask(parent.id),
+              title: child.title,
+              description: child.goal,
               version: 1,
-              status: "todo",
-              dependencies: [],
-              progress: "",
-              obstacle: "",
-              background: "",
-              nextStep: child.goal,
-              plannedDate: "",
               updatedAt: now,
             });
           }

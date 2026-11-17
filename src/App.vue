@@ -364,7 +364,13 @@ async function energy(event: Event) {
                 (a) => a.taskId === task.id && a.date === date,
               )
                 ? "今日"
-                : task.plannedDate || statusLabels[task.status]
+                : task.startDate && task.expectedDate
+                  ? `${task.startDate} → ${task.expectedDate}`
+                  : task.startDate
+                    ? `预计开始 ${task.startDate}`
+                    : task.expectedDate
+                      ? `预计完成 ${task.expectedDate}`
+                      : statusLabels[task.status]
             }}</small>
           </button>
           <p v-if="!visibleTasks.length" class="empty-state">
@@ -382,6 +388,7 @@ async function energy(event: Event) {
       v-if="editor"
       :key="editor.id"
       :task="editor"
+      @edit="edit"
       @close="editor = null"
     />
     <Modal

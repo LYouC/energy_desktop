@@ -106,21 +106,13 @@ test("能量更新与阶段完成各自独立", () => {
     "需要恢复",
   );
 });
-test("拒绝循环父子关系和依赖", () => {
+test("拒绝循环父子关系", () => {
   const state = fixture();
   assert.throws(
     () =>
       applyCommand(state, {
         type: "saveTask",
         task: { ...state.tasks[0], parentId: state.tasks[0].id },
-      }),
-    /循环/,
-  );
-  assert.throws(
-    () =>
-      applyCommand(state, {
-        type: "saveTask",
-        task: { ...state.tasks[0], dependencies: [state.tasks[0].id] },
       }),
     /循环/,
   );
@@ -182,7 +174,7 @@ test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
   state = applyCommand(state, { type: "proposal", proposal });
   state = applyCommand(state, {
     type: "saveTask",
-    task: { ...state.tasks[0], goal: "修改目标" },
+    task: { ...state.tasks[0], description: "修改目标" },
   });
   state = applyCommand(state, {
     type: "resolve",

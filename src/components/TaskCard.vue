@@ -69,12 +69,14 @@ async function unschedule() {
           {{ task.title }}
         </button>
         <div class="task-meta">
-          <span v-if="task.deadline"
-            ><CalendarDays :size="12" />{{
-              task.deadline.replace("T", " ")
-            }}
-            前</span
-          ><span>重要性{{ task.importance }}</span
+          <span v-if="task.startDate || task.expectedDate"
+            ><CalendarDays :size="12" />
+            <template v-if="task.startDate"
+              >预计开始 {{ task.startDate }}</template
+            >
+            <template v-if="task.expectedDate"
+              >预计完成 {{ task.expectedDate }}</template
+            > </span
           ><span>{{ statusLabels[task.status] }}</span>
         </div>
       </div>
@@ -103,11 +105,8 @@ async function unschedule() {
         /><span>{{ child.title }}</span
         ><small>{{ statusLabels[child.status] }}</small>
       </button>
-      <p v-if="task.nextStep" class="next-step">
-        从这里继续 · {{ task.nextStep }}
-      </p>
-      <p v-if="task.background" class="muted background-preview">
-        背景 · {{ task.background }}
+      <p v-if="task.description" class="muted background-preview">
+        {{ task.description }}
       </p>
     </template>
     <div class="task-footer">

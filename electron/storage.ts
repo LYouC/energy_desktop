@@ -7,6 +7,7 @@ import {
 } from "../shared/model";
 import { applyCommand } from "../shared/operations";
 import { applyAgentTurn } from "../shared/agent";
+import { migrateWorkspaceV1 } from "./migrations";
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -16,11 +17,27 @@ export class WorkspaceDatabase {
       const version = this.db.prepare("PRAGMA user_version").get() as {
         user_version: number;
       };
-      if (version.user_version > 1)
+      if (version.user_version > 2)
         throw new Error("数据库来自更新版本，请使用相应版本的息序打开。");
       this.db.exec(
-        "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL); PRAGMA user_version=1;",
+        "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL);",
       );
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const row = this.db
+          .prepare("SELECT payload FROM workspace WHERE id=1")
+          .get() as { payload: string } | undefined;
+        if (row && version.user_version < 2) {
+          const migrated = migrateWorkspaceV1(row.payload);
+          this.db
+            .prepare("UPDATE workspace SET revision=?, payload=? WHERE id=1")
+            .run(migrated.revision, JSON.stringify(migrated));
+        }
+        this.db.exec("PRAGMA user_version=2; COMMIT;");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
       const initial = emptyState();
       this.db
         .prepare(

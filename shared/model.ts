@@ -17,20 +17,11 @@ export const taskSchema = z.object({
   id: z.string(),
   version: z.number().int(),
   title: z.string().trim().min(1).max(200),
-  goal: z.string(),
-  deadline: z.string(),
-  plannedDate: z.string(),
+  description: z.string(),
+  startDate: z.string(),
   expectedDate: z.string(),
-  importance: z.enum(["待定", "高", "中", "低"]),
   status: z.enum(["todo", "doing", "waiting", "done", "abandoned"]),
   parentId: z.string().nullable(),
-  dependencies: z.array(z.string()),
-  background: z.string(),
-  backgroundKind: z.enum(["用户事实", "暂估", "推测"]),
-  backgroundSource: z.string().optional(),
-  progress: z.string(),
-  obstacle: z.string(),
-  nextStep: z.string(),
   updatedAt: z.string(),
 });
 export type Task = z.infer<typeof taskSchema>;
@@ -40,7 +31,6 @@ export const taskPatchSchema = taskSchema
     id: true,
     version: true,
     updatedAt: true,
-    backgroundSource: true,
   })
   .partial();
 // 会话工作记忆由模型整理。待创建内容仍留在会话里，用户接受后才成为真实任务。
@@ -199,19 +189,11 @@ export function newTask(parentId: string | null = null): Task {
     id: crypto.randomUUID(),
     version: 0,
     title: "",
-    goal: "",
-    deadline: "",
-    plannedDate: "",
+    description: "",
+    startDate: "",
     expectedDate: "",
-    importance: "待定",
     status: "todo",
     parentId,
-    dependencies: [],
-    background: "",
-    backgroundKind: "用户事实",
-    progress: "",
-    obstacle: "",
-    nextStep: "",
     updatedAt: new Date().toISOString(),
   };
 }

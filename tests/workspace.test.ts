@@ -49,7 +49,7 @@ test("修改任务保留 ID，旧版本表单被拒绝", () => {
   const old = structuredClone(state.tasks[0]);
   state = applyCommand(state, {
     type: "saveTask",
-    task: { ...old, title: "新标题", background: "纠正后的事实" },
+    task: { ...old, title: "新标题", description: "纠正后的事实" },
   });
   assert.equal(state.tasks.length, 1);
   assert.equal(state.tasks[0].id, old.id);
@@ -83,26 +83,14 @@ test("子任务完成不自动完成父任务，关联循环和缺失目标被�
       }),
     /不存在/,
   );
-  assert.throws(
-    () =>
-      applyCommand(state, {
-        type: "saveTask",
-        task: { ...state.tasks[0], dependencies: ["missing"] },
-      }),
-    /不存在/,
-  );
 });
 
-test("删除父任务清理后代、依赖、安排与待处理方案", () => {
+test("删除父任务清理后代、安排与待处理方案", () => {
   let state = taskState();
   const parent = state.tasks[0];
   const child = { ...newTask(parent.id), title: "子任务" };
   const grandchild = { ...newTask(child.id), title: "孙任务" };
-  for (const task of [
-    child,
-    grandchild,
-    { ...newTask(), title: "相关工作", dependencies: [child.id] },
-  ])
+  for (const task of [child, grandchild, { ...newTask(), title: "相关工作" }])
     state = applyCommand(state, { type: "saveTask", task });
   for (const task of state.tasks)
     state = applyCommand(state, {
@@ -118,7 +106,6 @@ test("删除父任务清理后代、依赖、安排与待处理方案", () => {
     state.tasks.map((task) => task.title),
     ["相关工作"],
   );
-  assert.deepEqual(state.tasks[0].dependencies, []);
   assert.equal(state.arrangements.length, 1);
   assert.equal(state.proposals[0].changes[0].status, "rejected");
 });
@@ -168,7 +155,7 @@ test("按日安排与移动只影响对应日期，同日更新保持唯一", ()
     taskId: a.id,
     date: "2026-11-16",
   });
-  assert.equal(state.tasks[0].plannedDate, "2026-11-17");
+  assert.equal(state.tasks[0].startDate, "");
 });
 
 for (const status of ["done", "abandoned"] as const)
@@ -288,10 +275,7 @@ test("会话草稿隔离，跨日上下文保留历史停点和已纠正事实",
     type: "saveTask",
     task: {
       ...state.tasks[0],
-      background: "已纠正事实",
-      progress: "停在初稿",
-      importance: "高",
-      deadline: "2026-11-18T14:00",
+      description: "已纠正事实；停在初稿；11月18日14点前必须完成",
     },
   });
   state = applyCommand(state, {
@@ -306,7 +290,10 @@ test("会话草稿隔离，跨日上下文保留历史停点和已纠正事实",
   assert.equal(context.energy.value, "状态平稳");
   assert.equal(context.today.length, 0);
   assert.equal(context.unfinishedTasks[0].previousArrangements.length, 1);
-  assert.equal(context.unfinishedTasks[0].background, "已纠正事实");
+  assert.equal(
+    context.unfinishedTasks[0].description,
+    "已纠正事实；停在初稿；11月18日14点前必须完成",
+  );
   assert.equal(
     state.sessions.find((item) => item.id === first)?.draft,
     "原草稿",
@@ -356,11 +343,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=2");
+  db.exec("PRAGMA user_version=3");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 2);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 3);
   inspect.close();
 });
 
