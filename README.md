@@ -24,7 +24,7 @@
 
 开发分支采用 `codex/desktop-prototype`，每个可验证阶段独立提交。便携开发工具、数据库及构建产物由 `.gitignore` 排除。
 
-当前 84 项业务、SQLite、Pinia、Agent 运行与配色测试、类型检查与标准构建通过，独立审查及复验范围见 [测试说明](tests/README.md)。
+当前 85 项业务、SQLite、Pinia、Agent 运行与配色测试、类型检查与标准构建通过，独立审查及复验范围见 [测试说明](tests/README.md)。
 
 任务、会话及设置保存在 Electron userData 的 `workspace.db`。验证脚本使用隔离的临时目录，截图在 `test-results/`。设置 `XIXU_DATA_DIR` 可指定独立的数据目录。主题首屏缓存只保存主题选项。
 

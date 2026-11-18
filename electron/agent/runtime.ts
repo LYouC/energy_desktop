@@ -2,16 +2,12 @@ import { streamText, tool, stepCountIs, type LanguageModel } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import {
-  agentActionSchema,
+  agentTurnSchema,
   applyAgentTurn,
   type AgentTurn,
 } from "../../shared/agent";
 import { buildContext, readConversation } from "../../shared/context";
-import {
-  agentMemorySchema,
-  type Command,
-  type State,
-} from "../../shared/model";
+import { localDate, type Command, type State } from "../../shared/model";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "../../shared/capacity";
 
@@ -22,8 +18,7 @@ const decisionSchema = z
       .describe(
         "conversation为纯交流，changes包括已授权操作和待接受方案。changes不代表每项都获授权，每项mode单独判断。",
       ),
-    actions: z.array(agentActionSchema).max(20),
-    memory: agentMemorySchema.optional(),
+    ...agentTurnSchema.omit({ text: true }).shape,
   })
   .refine(
     (decision) =>
@@ -98,7 +93,7 @@ export async function generateAgentTurn(options: {
   const dateAt = (offset: number) => {
     const value = new Date(today);
     value.setDate(value.getDate() + offset);
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    return localDate(value);
   };
   const weekday = (today.getDay() + 6) % 7;
   const calendar = {
@@ -213,20 +208,10 @@ export async function generateAgentTurn(options: {
     prepareStep: () => {
       streamFinalReply = Boolean(prepared);
       if (streamFinalReply) return { activeTools: [], toolChoice: "none" };
-
-      return {
-        activeTools: [
-          "readConversation",
-          "calculateCapacity",
-          "readTask",
-          "prepareTurn",
-        ],
-      };
     },
     onStepEnd: (step) => {
-      if (step.toolCalls.length === 0 && step.text.trim()) {
+      if (streamFinalReply && step.toolCalls.length === 0 && step.text.trim()) {
         finalText = step.text;
-        if (!streamFinalReply) emit({ type: "text", text: step.text });
       }
     },
     // 每轮先由模型明确本轮意图和动作，避免直接声称完成却跳过工具。
@@ -305,10 +290,9 @@ export async function generateAgentTurn(options: {
   const steps = await result.steps;
   const turn: AgentTurn = {
     text: finalText,
-    actions: prepared ?? [],
+    actions: prepared,
     ...(memory ? { memory } : {}),
   };
-  applyAgentTurn(state, sessionId, userText, turn);
   return {
     turn,
     trace: {

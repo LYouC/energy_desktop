@@ -69,6 +69,31 @@ const connection = {
 };
 const finalText = "已创建整理会议笔记任务，目标是方便检索决定和待办。";
 
+test("模型未提交决定时不展示执行完成正文", async () => {
+  const model = new MockLanguageModelV4({
+    doStream: async () => response([], "任务已经创建了"),
+  });
+  const state = emptyState();
+  const previews: string[] = [];
+  await assert.rejects(
+    generateAgentTurn({
+      state,
+      sessionId: state.activeSessionId,
+      focusedId: null,
+      userText: "帮我创建任务",
+      connection,
+      model,
+      signal: AbortSignal.timeout(10000),
+      emit: (event) => {
+        if (event.type === "text") previews.push(event.text);
+      },
+    }),
+    /模型未生成可应用的完整结果/,
+  );
+  assert.deepEqual(previews, []);
+  assert.deepEqual(state.tasks, []);
+});
+
 test("最终正文中的DSML补充操作使整轮失败，不能提交缺字段任务", async () => {
   let calls = 0;
   const model = new MockLanguageModelV4({

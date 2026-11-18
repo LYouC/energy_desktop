@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   newTask,
+  taskSchema,
   taskPatchSchema,
   childTaskSchema,
   agentMemorySchema,
@@ -10,13 +11,7 @@ import {
 } from "./model";
 import { applyCommand } from "./operations";
 
-const evidence = {
-  quote: z
-    .string()
-    .optional()
-    .describe(
-      "可选的操作依据说明。应用自行绑定本轮真实用户原话，无需重新抄写原文。",
-    ),
+const authorization = {
   mode: z
     .enum(["direct", "proposal"])
     .describe(
@@ -29,7 +24,7 @@ const existingTask = {
     .describe(
       "已保存任务的真实id，或同批createTask声明的ref。任务标题不是id，待接受拆分中的子任务尚无真实id。",
     ),
-  ...evidence,
+  ...authorization,
 };
 // 拒绝旧字段并交给同一工具循环修正，避免将已移除的内容静默丢弃。
 const agentTaskPatchSchema = taskPatchSchema
@@ -46,14 +41,9 @@ export const agentActionSchema = z.discriminatedUnion("type", [
       .string()
       .optional()
       .describe("本轮新任务的临时引用，后续action.taskId可使用此值"),
-    title: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .describe("根据对话自主概括的简洁任务标题"),
+    title: taskSchema.shape.title.describe("根据对话自主概括的简洁任务标题"),
     patch: agentTaskPatchSchema,
-    ...evidence,
+    ...authorization,
   }),
   z.object({
     type: z.literal("updateTask"),
@@ -99,7 +89,7 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     proposalId: z.string(),
     ids: z.array(z.string()).min(1),
     accept: z.boolean(),
-    ...evidence,
+    ...authorization,
   }),
 ]);
 export const agentTurnSchema = z.object({
