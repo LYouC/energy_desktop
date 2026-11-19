@@ -23,7 +23,6 @@ import Modal from "./Modal.vue";
 import ModelSettings from "./ModelSettings.vue";
 import ChatHistory from "./ChatHistory.vue";
 import { useWorkspace } from "@/stores/workspace";
-import { simulateReply } from "@/features/mock";
 import { buildContext } from "../../shared/context";
 import { statusLabels, type Change, type Proposal } from "../../shared/model";
 const props = defineProps<{ focusedId: string | null; collapsed: boolean }>();
@@ -42,10 +41,10 @@ const chatEl = ref<HTMLElement>();
 const chatMinWidth = 300;
 const chatMaxWidth = 560;
 let stopResize: (() => void) | null = null;
-const mode = ref<"real" | "mock">("real");
 const settingsOpen = ref(false);
 const configured = ref(false);
 const runError = ref("");
+const resolveError = ref("");
 type AgentRequest = Parameters<Window["desktop"]["sendAgent"]>[0];
 const retryRequest = shallowRef<AgentRequest>();
 const retryStatus = ref("");
@@ -55,7 +54,6 @@ const runStatus = ref("");
 let activeRunId: string | null = null;
 let runPromise: Promise<unknown> | null = null;
 let unsubscribe: (() => void) | undefined;
-let runTimer: ReturnType<typeof setTimeout>;
 let generation = 0;
 const sessionId = computed(() => store.state.activeSessionId);
 const messages = computed(() =>
@@ -73,6 +71,7 @@ watch(
   () => {
     cancel();
     runError.value = "";
+    resolveError.value = "";
     retryRequest.value = undefined;
     draft.value =
       store.state.sessions.find((item) => item.id === sessionId.value)?.draft ||
@@ -81,7 +80,7 @@ watch(
   { immediate: true },
 );
 watch(draft, (value) => {
-  if (running.value && mode.value === "real") return;
+  if (running.value) return;
   const id = sessionId.value;
   store.dispatch({ type: "draft", sessionId: id, text: value }).catch(() => {});
 });
@@ -128,7 +127,6 @@ function resetWidth() {
 }
 async function cancel() {
   generation++;
-  clearTimeout(runTimer);
   const id = activeRunId;
   activeRunId = null;
   if (id) {
@@ -146,24 +144,6 @@ async function cancel() {
   submittedText.value = "";
   runStatus.value = "";
   retryStatus.value = "";
-}
-async function message(
-  role: "user" | "assistant",
-  text: string,
-  id: string,
-  proposalId?: string,
-) {
-  await store.dispatch({
-    type: "message",
-    message: {
-      id: crypto.randomUUID(),
-      role,
-      text,
-      sessionId: id,
-      createdAt: new Date().toISOString(),
-      proposalId,
-    },
-  });
 }
 async function sendReal(request: AgentRequest, isRetry = false) {
   if (running.value || request.sessionId !== sessionId.value) return;
@@ -223,57 +203,19 @@ async function sendReal(request: AgentRequest, isRetry = false) {
 }
 async function send() {
   if (!draft.value.trim() || running.value) return;
-  if (mode.value === "real" && !configured.value) {
+  if (!configured.value) {
     settingsOpen.value = true;
     return;
   }
-  const text = draft.value.trim(),
-    id = sessionId.value;
-  if (mode.value === "real") {
-    await sendReal({
-      runId: crypto.randomUUID(),
-      sessionId: id,
-      text,
-      focusedId: props.focusedId,
-    });
-    return;
-  }
-  running.value = true;
-  const token = ++generation;
-  runError.value = "";
-  streamText.value = "";
-  try {
-    await message("user", text, id);
-    if (token !== generation) return;
-    draft.value = "";
-    runTimer = setTimeout(async () => {
-      if (token !== generation) return;
-      try {
-        const result = simulateReply(store.state, id, text, props.focusedId);
-        await store.dispatch({
-          type: "reply",
-          proposal: result.proposal,
-          message: {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            text: result.text,
-            sessionId: id,
-            createdAt: new Date().toISOString(),
-            proposalId: result.proposal?.id,
-          },
-        });
-      } catch {
-        runError.value = "模拟回复保存失败，请重试。";
-      } finally {
-        if (token === generation) running.value = false;
-      }
-    }, 500);
-  } catch {
-    runError.value = "消息保存失败，请重试。";
-    running.value = false;
-  }
+  await sendReal({
+    runId: crypto.randomUUID(),
+    sessionId: sessionId.value,
+    text: draft.value.trim(),
+    focusedId: props.focusedId,
+  });
 }
 async function resolve(proposal: Proposal, changes: Change[], accept: boolean) {
+  resolveError.value = "";
   try {
     await store.dispatch({
       type: "resolve",
@@ -281,7 +223,9 @@ async function resolve(proposal: Proposal, changes: Change[], accept: boolean) {
       ids: changes.map((change) => change.id),
       accept,
     });
-  } catch {}
+  } catch {
+    resolveError.value = "方案变更未能保存，请重试。";
+  }
 }
 async function switchSession(id: string) {
   await cancel();
@@ -435,7 +379,7 @@ onBeforeUnmount(() => {
           </div>
           <p>说说目标、已有进展或卡住的地方，我们一起找出现在能做的第一步。</p>
           <Button
-            v-if="mode === 'real' && !configured"
+            v-if="!configured"
             variant="outline"
             @click="settingsOpen = true"
             >配置模型后开始</Button
@@ -504,11 +448,7 @@ onBeforeUnmount(() => {
           <p>{{ streamText }}</p>
         </div>
         <p v-if="running" class="muted" role="status">
-          {{
-            mode === "mock"
-              ? "正在准备模拟方案…"
-              : retryStatus || runStatus || "正在分析…"
-          }}
+          {{ retryStatus || runStatus || "正在分析…" }}
         </p>
         <div v-if="runError" class="chat-error">
           <p class="error" role="alert">{{ runError }}</p>
@@ -520,6 +460,9 @@ onBeforeUnmount(() => {
           >
             重试本轮
           </Button>
+        </div>
+        <div v-if="resolveError" class="chat-error">
+          <p class="error" role="alert">{{ resolveError }}</p>
         </div>
       </div>
       <div class="chat-bottom">

@@ -18,7 +18,8 @@ export function buildContext(
     preferences: state.preferences,
     recentResults: state.tasks
       .filter((task) => ["done", "abandoned"].includes(task.status))
-      .slice(-10),
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 10),
     today: state.arrangements.filter((item) => item.date === date),
     unfinishedTasks: active.map((task) => ({
       ...task,

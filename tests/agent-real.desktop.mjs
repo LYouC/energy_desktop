@@ -15,7 +15,6 @@ async function launch() {
   });
   const page = await app.firstWindow();
   page.on("pageerror", (error) => errors.push(error.message));
-  await expect(page.getByLabel("对话模式")).toHaveValue("real");
   return { app, page };
 }
 let { app, page } = await launch();

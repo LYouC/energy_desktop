@@ -10,7 +10,6 @@ import {
   Coffee,
   Search,
   Check,
-  ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-vue-next";
@@ -18,6 +17,7 @@ import { useWorkspace } from "./stores/workspace";
 import Button from "./components/ui/button/Button.vue";
 import Modal from "./components/Modal.vue";
 import ManageBar from "./components/ManageBar.vue";
+import ManageToggle from "./components/ManageToggle.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import TaskCard from "./components/TaskCard.vue";
 import ChatPanel from "./components/ChatPanel.vue";
@@ -34,6 +34,7 @@ const view = ref<"today" | "all" | "completed">("today");
 const labels = { today: "今日安排", all: "所有任务", completed: "已完成" };
 const editor = ref<Task | null>(null);
 const settingsOpen = ref(false);
+const settingsError = ref("");
 const preferences = ref("");
 const theme = ref<"light" | "dark" | "system">("system");
 const focusId = ref<string | null>(null);
@@ -214,6 +215,7 @@ async function confirmDelete() {
 function openSettings() {
   preferences.value = store.state.preferences;
   theme.value = store.state.theme;
+  settingsError.value = "";
   settingsOpen.value = true;
 }
 async function saveSettings() {
@@ -224,7 +226,10 @@ async function saveSettings() {
       theme: theme.value,
     });
     settingsOpen.value = false;
-  } catch {}
+    settingsError.value = "";
+  } catch (cause) {
+    settingsError.value = `保存设置失败：${String(cause)}`;
+  }
 }
 async function energy(event: Event) {
   try {
@@ -346,15 +351,11 @@ async function energy(event: Event) {
               <p class="subtitle">把重要的事往前推，也给自己一点空间。</p>
             </div>
             <div class="page-actions">
-              <Button
+              <ManageToggle
                 v-if="pending.length || selecting"
-                variant="ghost"
-                :aria-pressed="selecting"
-                @click="toggleManaging"
-                ><ListChecks :size="15" />{{
-                  selecting ? "完成" : "管理"
-                }}</Button
-              >
+                :active="selecting"
+                @toggle="toggleManaging"
+              />
               <div class="day-stamp">
                 {{ date.slice(-2)
                 }}<small>{{
@@ -484,15 +485,11 @@ async function energy(event: Event) {
                 @click="editor = newTask()"
                 ><Plus :size="15" />添加任务</Button
               >
-              <Button
+              <ManageToggle
                 v-if="selecting || visibleTasks.length"
-                variant="ghost"
-                :aria-pressed="selecting"
-                @click="toggleManaging"
-                ><ListChecks :size="15" />{{
-                  selecting ? "完成" : "管理"
-                }}</Button
-              >
+                :active="selecting"
+                @toggle="toggleManaging"
+              />
               <label class="search"
                 ><Search :size="15" /><input
                   v-model="search"
@@ -616,9 +613,10 @@ async function energy(event: Event) {
             placeholder="例如，上午适合专注，晚上留出休息时间。"
           />
         </label>
-        <p class="notice">
-          模型 API 接入安排在后续阶段。当前模拟模式使用本地模板回复。
+        <p v-if="settingsError" role="alert" class="notice error">
+          {{ settingsError }}
         </p>
+        <p class="notice">模型凭据仅保存在本机，任务与对话不会离开本机。</p>
         <Button type="submit">保存设置</Button>
       </form></Modal
     >

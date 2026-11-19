@@ -9,7 +9,6 @@ const app = await electron.launch({
 });
 try {
   const page = await app.firstWindow();
-  await expect(page.getByLabel("对话模式")).toHaveValue("real");
   expect((await page.evaluate(() => window.desktop.load())).tasks).toHaveLength(
     0,
   );

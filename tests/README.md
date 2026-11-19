@@ -20,16 +20,16 @@
 
 `tests/task-fields.test.ts` 验证最小任务字段、普通/子任务一致、安排与起止日期隔离、日历与日期顺序校验、数据库 v1→v2 迁移、重开幂等与失败回滚。手动流程由 `tests/task-fields.desktop.mjs` 在隔离数据库中验证：只填名称保存、统一子任务表单、父子循环选项排除、独立日期、安排、重启、浅深主题及窄窗口；不发送消息、不调用模型。
 
-本轮业务验证命令：`node --import tsx --test --test-skip-pattern="选择子任务后|模拟规划保持" tests/domain.test.ts tests/workspace.test.ts tests/store.test.ts tests/palette.test.ts tests/task-fields.test.ts`。32 项通过。该命令明确排除 workspace 中两项模拟 Agent 用例，未覆盖的 Agent 回归不计作通过。
+本轮业务验证命令：`node --import tsx --test --test-skip-pattern="选择子任务后|模拟规划保持" tests/domain.test.ts tests/workspace.test.ts tests/store.test.ts tests/styles.test.ts tests/task-fields.test.ts`。32 项通过。该命令明确排除 workspace 中两项模拟 Agent 用例，未覆盖的 Agent 回归不计作通过。
 
-桌面验证先用 `node node_modules/vite/bin/vite.js build` 转译，再运行 `node tests/task-fields.desktop.mjs`。这是本轮独立手动流程验证，不能替代完整类型检查/标准构建。真实 Agent、模拟回复及相应测试的旧字段引用按用户要求留待后续 AI 适配，当前 `npm run typecheck` 和 `npm run build` 不通过；原 `test:desktop` 的旧表单定位亦需后续更新。下面 74 项测试为字段修订前的历史验证范围。
+桌面验证先用 `node node_modules/vite/bin/vite.js build` 转译，再运行 `node tests/task-fields.desktop.mjs`。这是本轮独立手动流程验证，不能替代完整类型检查/标准构建。真实 Agent、模拟回复及相应测试的旧字段引用按用户要求留待后续 AI 适配，当时 `npm run typecheck` 和 `npm run build` 不通过；原 `test:desktop` 的旧表单定位亦需后续更新。下面 74 项测试为字段修订前的历史验证范围。
 
 本轮实际结果：32 项业务回归通过；Vite 转译构建通过；上述 Electron 手动任务流程通过，浅深主题与 800px 窄窗口截图已查看。全量类型检查失败位置仅在真实 Agent、模拟回复及 Agent 测试，未声称 Agent 或标准构建通过。未调用真实模型、未修改用户本地数据库，也未重新生成 Windows 发布包。
 
 ## 运行
 
 - `npm test` 运行业务规则、SQLite、Pinia 队列和双主题配色回归。
-- `npm run test:desktop` 构建并运行完整 Electron 交互验证。
+- `npm run test:desktop` 构建并运行 Electron 交互验证（不含真实模型调用）。
 - `node tests/review.desktop.mjs` 对已构建的应用执行独立审查场景。
 - `node tests/agent-ui.desktop.mjs` 使用固定 IPC 流验证配置恢复、流式、取消与切会话，不调用真实模型。
 - `npm run test:agent:live` 串行执行六条真实模型实验，会产生 API 调用，使用本地 `.env.agent.local`，脱敏业务结果写入忽略的 `test-results/agent-live.json`。

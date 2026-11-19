@@ -49,6 +49,22 @@ function schedule(state: State, taskId: string, date: string, scope: string) {
   } else state.arrangements.push({ taskId, date, scope, done: false });
   task.version++;
 }
+function removeArrangement(state: State, taskId: string, date: string) {
+  const index = state.arrangements.findIndex(
+    (item) => item.taskId === taskId && item.date === date,
+  );
+  if (index < 0) throw new Error("这项安排已变化。");
+  state.arrangements.splice(index, 1);
+  findTask(state, taskId).version++;
+}
+function setStage(state: State, taskId: string, date: string, done: boolean) {
+  const item = state.arrangements.find(
+    (item) => item.taskId === taskId && item.date === date,
+  );
+  if (!item) throw new Error("这项安排已变化。");
+  item.done = done;
+  findTask(state, taskId).version++;
+}
 function addProposal(state: State, proposal: Proposal) {
   if (!state.sessions.some((session) => session.id === proposal.sessionId))
     throw new Error("方案所属对话不存在。");
@@ -115,23 +131,12 @@ export function applyCommand(previous: State, input: Command): State {
     case "schedule":
       schedule(state, command.taskId, command.date, command.scope);
       break;
-    case "unschedule": {
-      state.arrangements = state.arrangements.filter(
-        (item) => item.taskId !== command.taskId || item.date !== command.date,
-      );
-      const task = findTask(state, command.taskId);
-      task.version++;
+    case "unschedule":
+      removeArrangement(state, command.taskId, command.date);
       break;
-    }
-    case "stage": {
-      const item = state.arrangements.find(
-        (item) => item.taskId === command.taskId && item.date === command.date,
-      );
-      if (!item) throw new Error("这项安排已变化。");
-      item.done = command.done;
-      findTask(state, command.taskId).version++;
+    case "stage":
+      setStage(state, command.taskId, command.date, command.done);
       break;
-    }
     case "move": {
       const source = state.arrangements.findIndex(
         (item) =>
@@ -201,19 +206,14 @@ export function applyCommand(previous: State, input: Command): State {
             change.fromTaskId &&
             (change.fromTaskId !== change.taskId ||
               (change.fromDate ?? change.date) !== change.date)
-          ) {
-            const updated = applyCommand(state, {
-              type: "unschedule",
-              taskId: change.fromTaskId,
-              date: change.fromDate ?? change.date,
-            });
-            state.tasks = updated.tasks;
-            state.arrangements = updated.arrangements;
-          } else if (change.fromDate && change.fromDate !== change.date)
-            state.arrangements = state.arrangements.filter(
-              (item) =>
-                item.taskId !== change.taskId || item.date !== change.fromDate,
+          )
+            removeArrangement(
+              state,
+              change.fromTaskId,
+              change.fromDate ?? change.date,
             );
+          else if (change.fromDate && change.fromDate !== change.date)
+            removeArrangement(state, change.taskId, change.fromDate);
           schedule(state, change.taskId, change.date, change.scope);
         } else if (change.type === "update") {
           if (!change.patch) throw new Error("任务修改内容缺失。");
@@ -225,23 +225,10 @@ export function applyCommand(previous: State, input: Command): State {
           checkDates(task);
           checkRelations(state.tasks);
         } else if (change.type === "unschedule") {
-          const updated = applyCommand(state, {
-            type: "unschedule",
-            taskId: change.taskId,
-            date: change.date,
-          });
-          state.tasks = updated.tasks;
-          state.arrangements = updated.arrangements;
+          removeArrangement(state, change.taskId, change.date);
         } else if (change.type === "stage") {
           if (change.done === undefined) throw new Error("阶段完成状态缺失。");
-          const updated = applyCommand(state, {
-            type: "stage",
-            taskId: change.taskId,
-            date: change.date,
-            done: change.done,
-          });
-          state.tasks = updated.tasks;
-          state.arrangements = updated.arrangements;
+          setStage(state, change.taskId, change.date, change.done);
         } else {
           const parent = findTask(state, change.taskId);
           for (const child of change.children) {

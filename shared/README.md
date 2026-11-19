@@ -22,4 +22,4 @@ Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑�
 
 关键验证见 `tests/agent-domain.test.ts`，包括自然确认、同轮引用、字段隔离、会话草拟和历史查询；工具顺序及失败修正见 `tests/agent-tools.test.ts`。
 
-`capacity.ts` 接收分钟为单位的可用时间、任务估时和缓冲，返回总量、缺口、单项是否能放下及条件性分配。它负责算术，不替用户决定优先级，也不保证估时准确。由运行层的 `calculateCapacity` 工具调用，验证见 `tests/capacity.test.ts`。
+`capacity.ts` 以固定 15 分钟缓冲接收分钟为单位的可用时间和任务估时，返回总量、缺口、单项是否能放下及条件性分配。它负责算术，不替用户决定优先级，也不保证估时准确。由运行层的 `calculateCapacity` 工具调用，验证见 `tests/capacity.test.ts`。

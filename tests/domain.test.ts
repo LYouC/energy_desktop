@@ -167,6 +167,48 @@ test("重复变更 ID 不会重复创建子任务", () => {
   assert.equal(state.tasks.filter((task) => task.parentId).length, 1);
 });
 
+test("取消安排只生效一次，不存在的安排被拒绝", () => {
+  let state = fixture();
+  const taskId = state.tasks[0].id;
+  state = applyCommand(state, {
+    type: "schedule",
+    taskId,
+    date: localDate(),
+    scope: "初稿",
+  });
+  const version = state.tasks[0].version;
+  state = applyCommand(state, {
+    type: "unschedule",
+    taskId,
+    date: localDate(),
+  });
+  assert.equal(state.arrangements.length, 0);
+  assert.equal(state.tasks[0].version, version + 1);
+  assert.throws(
+    () =>
+      applyCommand(state, {
+        type: "unschedule",
+        taskId,
+        date: localDate(),
+      }),
+    /已变化/,
+  );
+});
+test("最近结果按更新时间降序保留十条", () => {
+  let state = emptyState();
+  for (let index = 0; index < 12; index++)
+    state = applyCommand(state, {
+      type: "saveTask",
+      task: { ...newTask(), title: `任务${index}`, status: "done" },
+    });
+  state.tasks.forEach((task, index) => {
+    task.updatedAt = `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`;
+  });
+  const results = buildContext(state, state.activeSessionId).recentResults;
+  assert.equal(results.length, 10);
+  assert.equal(results[0].title, "任务11");
+  assert.equal(results[9].title, "任务2");
+});
 test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
   let state = fixture();
   const proposal = propose(state);

@@ -16,7 +16,6 @@ async function launch() {
   await expect(
     page.getByRole("heading", { name: "今天，留一点余地。" }),
   ).toBeVisible();
-  await page.getByLabel("对话模式").selectOption("mock");
   return { app, page };
 }
 let { app, page } = await launch();
@@ -45,21 +44,6 @@ try {
   expect(await page.getByLabel("和息序聊聊").inputValue()).toContain(
     "有些疲惫",
   );
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "接受这项", exact: true }),
-  ).toHaveCount(2);
-  await page
-    .getByRole("button", { name: "接受这项", exact: true })
-    .first()
-    .click();
-  await expect(page.locator(".task-card")).toHaveCount(1);
-  await expect(page.getByText("已接受 · 已生效")).toHaveCount(1);
-  await page.getByRole("button", { name: "拒绝", exact: true }).click();
-  await page.getByRole("button", { name: "完成今日阶段" }).click();
-  const state = await page.evaluate(() => window.desktop.load());
-  expect(state.tasks.every((task) => task.status === "todo")).toBe(true);
-  expect(state.arrangements[0].done).toBe(true);
   await page.getByRole("button", { name: /所有任务/ }).click();
   await expect(
     page.getByRole("heading", { name: "所有任务", exact: true }),
@@ -79,41 +63,12 @@ try {
     "晚上保留休息时间",
   );
   await page.getByRole("button", { name: "关闭", exact: true }).click();
-  await page.getByRole("button", { name: "拆分任务", exact: true }).click();
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "接受这项", exact: true }),
-  ).toHaveCount(1);
-  await page.getByRole("button", { name: "接受这项", exact: true }).click();
-  const split = await page.evaluate(() => window.desktop.load());
-  expect(split.tasks.filter((task) => task.parentId)).toHaveLength(3);
-  await page.getByRole("button", { name: "重新分析", exact: true }).click();
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await page.getByRole("button", { name: "取消生成", exact: true }).click();
-  await page.waitForTimeout(650);
-  expect(
-    (await page.evaluate(() => window.desktop.load())).proposals,
-  ).toHaveLength(2);
-  await page.getByRole("button", { name: "重新分析", exact: true }).click();
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "接受这项", exact: true }),
-  ).toHaveCount(2);
   await page.getByLabel("和息序聊聊").fill("保留这段输入草稿");
   await page.waitForTimeout(400);
   await app.close();
   ({ app, page } = await launch());
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByLabel("和息序聊聊")).toHaveValue("保留这段输入草稿");
-  const restored = await page.evaluate(() => window.desktop.load());
-  expect(restored.tasks).toHaveLength(5);
-  expect(restored.arrangements).toHaveLength(1);
-  expect(restored.proposals).toHaveLength(3);
-  expect(
-    restored.proposals[2].changes.every(
-      (change) => change.status === "pending",
-    ),
-  ).toBe(true);
   await page.getByRole("button", { name: "我的空间 本地保存" }).click();
   await page.getByLabel("主题").selectOption("light");
   await page.getByRole("button", { name: "保存设置" }).click();
@@ -143,7 +98,7 @@ try {
   });
   expect(errors).toEqual([]);
   console.log(
-    "PASS: CRUD, latest energy, partial acceptance, stage completion, split, themes, context, SQLite restart, draft, narrow layout",
+    "PASS: CRUD, latest energy, themes, context, SQLite restart, draft, narrow layout",
   );
 } finally {
   await app.close();

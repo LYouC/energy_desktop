@@ -22,7 +22,6 @@ try {
   await expect(
     page.getByRole("heading", { name: "今天，留一点余地。" }),
   ).toBeVisible();
-  await page.getByLabel("对话模式").selectOption("mock");
   await page.evaluate(async () => {
     let state = await window.desktop.load();
     const task = (id, title, parentId = null) => ({
@@ -60,7 +59,6 @@ try {
     });
   });
   await page.reload();
-  await page.getByLabel("对话模式").selectOption("mock");
   await expect(page.locator(".task-card")).toHaveCount(1);
   await settings("system");
   await page.emulateMedia({ colorScheme: "light" });
@@ -100,15 +98,6 @@ try {
   }
   await page.locator(".child-row").click();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
-  await page.getByRole("button", { name: "帮我开始", exact: true }).click();
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(page.locator(".assistant")).toHaveCount(1);
-  await expect(page.locator(".assistant")).toContainText(
-    "我们先看「选中的分析子任务」",
-  );
-  checks.push(
-    `选择子任务后的启动协助为 ${await page.locator(".assistant").innerText()}`,
-  );
   for (const theme of ["light", "dark"]) {
     await settings(theme);
     const ratios = await page.evaluate(() => {
@@ -118,7 +107,6 @@ try {
         ".profile small",
         ".energy .eyebrow",
         ".chat-header > span",
-        ".message.user p",
       ];
       function luminance(color) {
         const values = color
@@ -158,7 +146,7 @@ try {
         result.ratio,
         `${theme} ${result.selector} contrast`,
       ).toBeGreaterThanOrEqual(4.5);
-    checks.push(`${theme}导航、能量和用户消息的文字对比度均达到4.5:1`);
+    checks.push(`${theme}导航和能量的文字对比度均达到4.5:1`);
   }
   await page.setViewportSize({ width: 800, height: 720 });
   await page.getByRole("button", { name: "查看任务详情" }).click();
