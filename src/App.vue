@@ -9,15 +9,19 @@ import {
   Settings,
   Coffee,
   Search,
+  Check,
+  ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-vue-next";
 import { useWorkspace } from "./stores/workspace";
 import Button from "./components/ui/button/Button.vue";
 import Modal from "./components/Modal.vue";
+import ManageBar from "./components/ManageBar.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import TaskCard from "./components/TaskCard.vue";
 import ChatPanel from "./components/ChatPanel.vue";
+import { useTaskSelection } from "./composables/taskSelection";
 import {
   localDate,
   newTask,
@@ -33,6 +37,7 @@ const settingsOpen = ref(false);
 const preferences = ref("");
 const theme = ref<"light" | "dark" | "system">("system");
 const focusId = ref<string | null>(null);
+const contextTaskId = ref<string | null>(null);
 const sidebarCollapsed = ref(
   localStorage.getItem("xixu-sidebar-collapsed") === "1",
 );
@@ -58,6 +63,22 @@ const shellStyle = computed(() => {
   return style;
 });
 const search = ref("");
+const {
+  managing: selecting,
+  count: selectedCount,
+  start: startSelection,
+  stop: stopSelection,
+  toggle: toggleSelection,
+  isSelected,
+  selectAll: selectAllTasks,
+  retain: retainSelection,
+  clear: clearSelection,
+  deletionOrder,
+} = useTaskSelection();
+const deleteOpen = ref(false);
+const deleting = ref(false);
+const deleteError = ref("");
+const deleteTargets = ref<Task[]>([]);
 const date = ref(localDate());
 const dateTimer = setInterval(() => {
   date.value = localDate();
@@ -102,13 +123,36 @@ const arrangements = computed(() =>
       return task ? [{ ...item, task }] : [];
     }),
 );
+const pending = computed(() => arrangements.value.filter((item) => !item.done));
+const completed = computed(() =>
+  arrangements.value.filter((item) => item.done),
+);
 const focused = computed(
   () =>
-    arrangements.value.find((item) => item.taskId === focusId.value)?.taskId ||
-    arrangements.value.find((item) => !item.done)?.taskId ||
-    arrangements.value[0]?.taskId ||
-    null,
+    pending.value.find((item) => item.taskId === focusId.value) ??
+    pending.value[0],
 );
+const remaining = computed(() =>
+  pending.value.filter((item) => item.taskId !== focused.value?.taskId),
+);
+const manageableTasks = computed(() =>
+  view.value === "today"
+    ? pending.value.map((item) => item.task)
+    : visibleTasks.value,
+);
+const allSelected = computed(
+  () =>
+    manageableTasks.value.length > 0 &&
+    manageableTasks.value.every((task) => isSelected(task.id)),
+);
+watch(view, () => stopSelection());
+watch(manageableTasks, (tasks) => {
+  if (selecting.value) retainSelection(tasks);
+});
+watch(pending, (items) => {
+  if (!items.some((item) => item.taskId === focusId.value))
+    focusId.value = null;
+});
 const historicalUnfinished = computed(
   () =>
     store.state.arrangements.filter(
@@ -124,7 +168,48 @@ const historicalUnfinished = computed(
 );
 function edit(task: Task) {
   editor.value = JSON.parse(JSON.stringify(task));
-  focusId.value = task.id;
+  contextTaskId.value = task.id;
+}
+function selectFocus(taskId: string) {
+  focusId.value = taskId;
+  contextTaskId.value = null;
+}
+function toggleManaging() {
+  if (selecting.value) stopSelection();
+  else startSelection();
+}
+function toggleAll() {
+  if (allSelected.value) clearSelection();
+  else selectAllTasks(manageableTasks.value);
+}
+function openDelete() {
+  const ids = deletionOrder(manageableTasks.value);
+  deleteTargets.value = manageableTasks.value.filter((task) =>
+    ids.includes(task.id),
+  );
+  if (!deleteTargets.value.length) return;
+  deleteError.value = "";
+  deleteOpen.value = true;
+}
+async function confirmDelete() {
+  if (!deleteTargets.value.length) return;
+  deleting.value = true;
+  deleteError.value = "";
+  let removed = 0;
+  try {
+    for (const task of [...deleteTargets.value]) {
+      await store.dispatch({ type: "deleteTask", id: task.id });
+      removed += 1;
+    }
+    deleteOpen.value = false;
+    stopSelection();
+  } catch (cause) {
+    deleteTargets.value = deleteTargets.value.slice(removed);
+
+    deleteError.value = `已删除 ${removed} 项，其余任务未处理：${String(cause)}`;
+  } finally {
+    deleting.value = false;
+  }
 }
 function openSettings() {
   preferences.value = store.state.preferences;
@@ -246,7 +331,7 @@ async function energy(event: Event) {
       </div>
       <div class="main-scroll">
         <template v-if="view === 'today'">
-          <header class="page-heading">
+          <header class="page-heading today-heading">
             <div>
               <p class="date">
                 {{
@@ -260,17 +345,28 @@ async function energy(event: Event) {
               <h1>今天，留一点余地。</h1>
               <p class="subtitle">把重要的事往前推，也给自己一点空间。</p>
             </div>
-            <div class="day-stamp">
-              {{ date.slice(-2)
-              }}<small>{{
-                new Date(date + "T12:00:00")
-                  .toLocaleDateString("en", { month: "long" })
-                  .toUpperCase()
-              }}</small>
+            <div class="page-actions">
+              <Button
+                v-if="pending.length || selecting"
+                variant="ghost"
+                :aria-pressed="selecting"
+                @click="toggleManaging"
+                ><ListChecks :size="15" />{{
+                  selecting ? "完成" : "管理"
+                }}</Button
+              >
+              <div class="day-stamp">
+                {{ date.slice(-2)
+                }}<small>{{
+                  new Date(date + "T12:00:00")
+                    .toLocaleDateString("en", { month: "long" })
+                    .toUpperCase()
+                }}</small>
+              </div>
             </div>
           </header>
           <section class="energy">
-            <Sun :size="35" :stroke-width="1.2" />
+            <Sun :size="26" :stroke-width="1.5" />
             <div>
               <label for="energy" class="eyebrow">此刻的能量</label
               ><select
@@ -286,15 +382,20 @@ async function energy(event: Event) {
             </div>
             <span class="energy-caption">按自己的节奏，稳稳向前。</span>
           </section>
-          <p v-if="historicalUnfinished" class="notice">
-            有
-            {{ historicalUnfinished }}
-            项历史安排尚未完成，已纳入分析上下文。可以重新判断推进日期与价值。
-          </p>
           <div class="section-heading">
             <h2>今日安排</h2>
-            <span class="muted">按规划顺序</span>
+            <span v-if="pending.length && !selecting" class="muted"
+              >{{ pending.length }} 项待推进</span
+            >
           </div>
+          <ManageBar
+            v-if="selecting"
+            :count="selectedCount"
+            :total="pending.length"
+            :all-selected="allSelected"
+            @toggle-all="toggleAll"
+            @remove="openDelete"
+          />
           <div v-if="!arrangements.length" class="empty-state">
             <Sun :size="28" />
             <h2>给今天一个开始</h2>
@@ -303,22 +404,69 @@ async function energy(event: Event) {
               ><Plus :size="16" />记下一件事</Button
             >
           </div>
-          <template v-for="(item, index) in arrangements" :key="item.taskId"
-            ><TaskCard
-              :task="item.task"
-              :arrangement="item"
-              :focus="item.taskId === focused"
+          <div v-else :class="['today-plan', { selecting }]">
+            <TaskCard
+              v-if="focused"
+              :task="focused.task"
+              :arrangement="focused"
+              focus
+              :selectable="selecting"
+              :selected="isSelected(focused.task.id)"
+              @select="toggleSelection"
               @edit="edit"
-              @focus-task="focusId = $event"
             />
-            <div v-if="index === 0 && arrangements.length > 1" class="pause">
-              <Coffee :size="15" />中间，留一小段空白
-            </div></template
-          >
+            <p v-else class="today-finished" role="status">
+              <CircleCheck :size="18" /> 今日安排已全部完成
+            </p>
+            <section
+              v-if="remaining.length"
+              aria-labelledby="remaining-heading"
+            >
+              <div class="remaining-heading">
+                <h3 id="remaining-heading">其余待推进</h3>
+                <span class="muted rest-hint"
+                  ><Coffee :size="14" />需要时歇一会儿</span
+                >
+              </div>
+              <TaskCard
+                v-for="(item, index) in remaining"
+                :key="item.taskId"
+                :task="item.task"
+                :arrangement="item"
+                :previous-task-id="remaining[index - 1]?.taskId"
+                :next-task-id="remaining[index + 1]?.taskId"
+                :selectable="selecting"
+                :selected="isSelected(item.task.id)"
+                @select="toggleSelection"
+                @edit="edit"
+                @focus-task="selectFocus"
+              />
+            </section>
+            <details
+              v-if="completed.length && !selecting"
+              class="today-completed"
+            >
+              <summary>
+                已完成的今日阶段 <span>{{ completed.length }} 项</span>
+              </summary>
+              <TaskCard
+                v-for="item in completed"
+                :key="item.taskId"
+                :task="item.task"
+                :arrangement="item"
+                @edit="edit"
+              />
+            </details>
+          </div>
+          <p v-if="historicalUnfinished" class="notice today-notice">
+            有
+            {{ historicalUnfinished }}
+            项历史安排尚未完成，已纳入分析上下文。可以重新判断推进日期与价值。
+          </p>
         </template>
         <template v-else
           ><header class="page-heading">
-            <div>
+            <div class="page-heading-copy">
               <p class="date">我的任务总览</p>
               <h1>{{ labels[view] }}</h1>
               <p class="subtitle">
@@ -329,29 +477,58 @@ async function energy(event: Event) {
                 }}
               </p>
             </div>
-            <Button
-              v-if="view === 'all'"
-              variant="outline"
-              @click="editor = newTask()"
-              ><Plus :size="15" />添加任务</Button
-            >
+            <div class="page-actions">
+              <Button
+                v-if="view === 'all' && !selecting"
+                variant="outline"
+                @click="editor = newTask()"
+                ><Plus :size="15" />添加任务</Button
+              >
+              <Button
+                v-if="selecting || visibleTasks.length"
+                variant="ghost"
+                :aria-pressed="selecting"
+                @click="toggleManaging"
+                ><ListChecks :size="15" />{{
+                  selecting ? "完成" : "管理"
+                }}</Button
+              >
+              <label class="search"
+                ><Search :size="15" /><input
+                  v-model="search"
+                  placeholder="搜索任务"
+                  aria-label="搜索任务"
+              /></label>
+            </div>
           </header>
-          <label class="search"
-            ><Search :size="16" /><input
-              v-model="search"
-              placeholder="搜索任务"
-              aria-label="搜索任务"
-          /></label>
-          <div class="list-heading">
+          <ManageBar
+            v-if="selecting"
+            :count="selectedCount"
+            :total="visibleTasks.length"
+            :all-selected="allSelected"
+            @toggle-all="toggleAll"
+            @remove="openDelete"
+          />
+          <div v-else class="list-heading">
             <span>任务</span><span>{{ visibleTasks.length }} 项</span>
           </div>
           <button
             v-for="task in visibleTasks"
             :key="task.id"
             class="task-list-row"
-            @click="edit(task)"
+            :class="{
+              selected: selecting && isSelected(task.id),
+            }"
+            :aria-pressed="selecting ? isSelected(task.id) : undefined"
+            @click="selecting ? toggleSelection(task.id) : edit(task)"
           >
-            <CircleCheck v-if="task.status === 'done'" :size="17" /><span
+            <span
+              v-if="selecting"
+              class="select-box"
+              :class="{ checked: isSelected(task.id) }"
+              ><Check v-if="isSelected(task.id)" :size="12"
+            /></span>
+            <CircleCheck v-else-if="task.status === 'done'" :size="17" /><span
               v-else
               class="list-dot"
             ></span
@@ -381,9 +558,39 @@ async function energy(event: Event) {
     </main>
     <ChatPanel
       v-model:collapsed="chatCollapsed"
-      :focused-id="focusId || focused"
+      :focused-id="contextTaskId ?? focused?.taskId ?? null"
       @resize="chatWidth = $event"
     />
+    <Modal
+      v-model:open="deleteOpen"
+      title="删除任务"
+      description="任务及其子任务、相关安排会一并删除，且无法恢复。"
+      ><div class="delete-summary">
+        <p class="manage-count">
+          将删除以下 <strong>{{ deleteTargets.length }}</strong> 项任务
+        </p>
+        <ul class="delete-list">
+          <li v-for="task in deleteTargets.slice(0, 5)" :key="task.id">
+            {{ task.title }}
+          </li>
+        </ul>
+        <p v-if="deleteTargets.length > 5" class="muted">
+          以及另外 {{ deleteTargets.length - 5 }} 项
+        </p>
+      </div>
+      <p v-if="deleteError" role="alert" class="error">{{ deleteError }}</p>
+      <div class="form-actions confirm-actions">
+        <Button variant="ghost" @click="deleteOpen = false">取消</Button>
+        <Button
+          variant="destructive"
+          :disabled="deleting || !deleteTargets.length"
+          @click="confirmDelete"
+          >{{
+            deleting ? "正在删除…" : `删除 ${deleteTargets.length} 项`
+          }}</Button
+        >
+      </div>
+    </Modal>
     <TaskEditor
       v-if="editor"
       :key="editor.id"

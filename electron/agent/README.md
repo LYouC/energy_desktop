@@ -8,7 +8,7 @@
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
 
-每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。准备和答复共用一套工具循环，最多六步、两分钟，网络自动重试为零。每轮至少包含决策和答复两个模型步骤。额外同模型 review 试验未识别连续流程遗漏，已撤回，其结果保留在验证记录。
+每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。每次生成共用一套最多六步的工具循环。运行层对可重试的服务或网络故障最多退避重试三次，共享两分钟总时限；取消立即终止等待，业务校验和鉴权失败不会自动重试。额外同模型 review 试验未识别连续流程遗漏，已撤回，其结果保留在验证记录。
 
 SiliconFlow 继续使用已验证的 `enable_thinking:false` 工具调用配置。本轮尝试服务默认推理时未得到可应用结果，尚未确认该模式的完整兼容性。参数说明见 [SiliconFlow 官方文档](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
 

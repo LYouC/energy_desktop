@@ -157,7 +157,9 @@ test("provider异常原文被脱敏，失败后释放并发锁", async () => {
   const db = new WorkspaceDatabase(":memory:");
   const input = { ...request(), sessionId: db.load().activeSessionId };
   let fail = true;
+  let calls = 0;
   const runtime = new AgentRuntime(db, connection, async () => {
+    calls++;
     if (fail) throw new Error("Bearer private-placeholder response body");
     return result;
   });
@@ -169,10 +171,76 @@ test("provider异常原文被脱敏，失败后释放并发锁", async () => {
       return true;
     },
   );
+  assert.equal(calls, 1);
   fail = false;
   await runtime.send(input, () => {});
   assert.equal(db.load().messages.length, 2);
   db.close();
+});
+test("网络失败最多自动重试三次，手动重试仍只保存一次用户消息和任务", async (context) => {
+  const db = new WorkspaceDatabase(":memory:");
+  context.after(() => db.close());
+  const input = {
+    ...request("记录整理报告"),
+    sessionId: db.load().activeSessionId,
+  };
+  let calls = 0;
+  const retries: string[] = [];
+  const runtime = new AgentRuntime(db, connection, async () => {
+    if (++calls <= 4) throw new TypeError("terminated");
+    return {
+      ...result,
+      turn: {
+        text: "已记录",
+        actions: [
+          {
+            type: "createTask",
+            title: "整理报告",
+            patch: {},
+            mode: "direct",
+            quote: input.text,
+          },
+        ],
+      },
+    };
+  });
+  await assert.rejects(
+    runtime.send(input, (event) => {
+      if (event.type === "retry") retries.push(event.text);
+    }),
+    /自动重试 3 次/,
+  );
+  assert.equal(calls, 4);
+  assert.equal(retries.length, 3);
+  assert.equal(db.load().messages.length, 1);
+  assert.equal(db.load().tasks.length, 0);
+  await runtime.send(input, () => {});
+  await runtime.send(input, () => {});
+  assert.equal(calls, 5);
+  assert.deepEqual(
+    db.load().messages.map(({ role }) => role),
+    ["user", "assistant"],
+  );
+  assert.equal(db.load().tasks.length, 1);
+});
+
+test("取消自动重试等待后不再请求模型", async (context) => {
+  const db = new WorkspaceDatabase(":memory:");
+  context.after(() => db.close());
+  const input = { ...request(), sessionId: db.load().activeSessionId };
+  let calls = 0;
+  const runtime = new AgentRuntime(db, connection, async () => {
+    calls++;
+    throw new TypeError("fetch failed");
+  });
+  await assert.rejects(
+    runtime.send(input, (event) => {
+      if (event.type === "retry") runtime.cancel(input.runId);
+    }),
+    /取消或超时/,
+  );
+  assert.equal(calls, 1);
+  assert.equal(db.load().messages.length, 1);
 });
 test("规划快照忽略展示状态而保留用户明确偏好", () => {
   const db = new WorkspaceDatabase(":memory:");

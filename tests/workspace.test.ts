@@ -136,7 +136,7 @@ test("按日安排与移动只影响对应日期，同日更新保持唯一", ()
     type: "move",
     taskId: b.id,
     date: "2026-11-16",
-    direction: "up",
+    targetTaskId: a.id,
   });
   assert.deepEqual(
     state.arrangements

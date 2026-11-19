@@ -1,4 +1,11 @@
-import { streamText, tool, stepCountIs, type LanguageModel } from "ai";
+import {
+  APICallError,
+  streamText,
+  tool,
+  stepCountIs,
+  type LanguageModel,
+} from "ai";
+import { setTimeout as delay } from "node:timers/promises";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import {
@@ -34,7 +41,7 @@ const decisionSchema = z
 export type Connection = { baseURL: string; model: string; apiKey: string };
 export type AgentEvent = {
   runId: string;
-  type: "text" | "status";
+  type: "text" | "status" | "retry";
   text: string;
 };
 export type TurnTrace = {
@@ -46,6 +53,35 @@ export type TurnTrace = {
   calls?: { name: string; input: unknown }[];
   validationErrors?: string[];
 };
+
+const maxNetworkRetries = 3;
+const retriesExhausted = "模型服务暂时无法连接，自动重试 3 次仍未成功。";
+const networkCodes = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ENOTFOUND",
+  "ENETUNREACH",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+function isRetryableNetworkError(error: unknown): boolean {
+  if (APICallError.isInstance(error)) return error.isRetryable;
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    networkCodes.has(code ?? "") ||
+    (error instanceof TypeError &&
+      /^(fetch failed|failed to fetch|terminated)$/i.test(error.message)) ||
+    (error.cause instanceof Error &&
+      networkCodes.has((error.cause as NodeJS.ErrnoException).code ?? ""))
+  );
+}
 
 // 草稿、主题和历史消息的变化不使方案过期，任务事实/能量/偏好变化则必须重新分析。
 export function planningSnapshot(state: State) {
@@ -253,7 +289,10 @@ export async function generateAgentTurn(options: {
     // 最终回复阶段已关闭工具，文字可以安全流式展示。
     if (streamFinalReply && event.type === "text-delta")
       emit({ type: "text", text: event.text });
-    if (event.type === "error") streamError = true;
+    if (event.type === "error") {
+      if (isRetryableNetworkError(event.error)) throw event.error;
+      streamError = true;
+    }
     if (event.type === "tool-error")
       validationErrors.push(String(event.error).slice(0, 1000));
   }
@@ -335,6 +374,25 @@ export class AgentRuntime {
   cancel(runId: string) {
     if (this.active?.runId === runId) this.active.controller.abort();
   }
+  private async generateWithRetry(
+    options: Parameters<typeof generateAgentTurn>[0],
+  ) {
+    for (let attempt = 0; ; attempt++) {
+      options.signal.throwIfAborted();
+      try {
+        return await this.generate(options);
+      } catch (error) {
+        options.signal.throwIfAborted();
+        if (!isRetryableNetworkError(error)) throw error;
+        if (attempt === maxNetworkRetries) throw new Error(retriesExhausted);
+        options.emit({
+          type: "retry",
+          text: `模型服务暂不可用，正在自动重试（${attempt + 1}/${maxNetworkRetries}）…`,
+        });
+        await delay(250 * 2 ** attempt, undefined, { signal: options.signal });
+      }
+    }
+  }
   async send(
     input: unknown,
     emit: (event: AgentEvent) => void,
@@ -359,8 +417,13 @@ export class AgentRuntime {
       throw new Error("请求标识已经用于其他消息，请重新发送。");
     // 成功标识与结果在同一事务保存，重启后也能识别重试。
     if (state.messages.some((m) => m.id === replyId)) return state;
+    if (
+      previousMessage &&
+      state.messages.filter((m) => m.sessionId === request.sessionId).at(-1)
+        ?.id !== messageId
+    )
+      throw new Error("此对话已有后续消息，不能重试较早的一轮。");
     if (this.active) throw new Error("已有一轮分析正在进行，请等待或取消。");
-    const connection = this.connection();
     const controller = new AbortController();
     this.active = { runId: request.runId, controller };
     const timeout = setTimeout(() => controller.abort(), 120000);
@@ -377,18 +440,21 @@ export class AgentRuntime {
           },
         });
       const snapshot = planningSnapshot(state);
-      const { turn } = await this.generate({
+      const { turn } = await this.generateWithRetry({
         state,
         sessionId: request.sessionId,
         focusedId: request.focusedId,
         userText: request.text,
-        connection,
+        connection: this.connection(),
         signal: controller.signal,
         emit: (event) => emit({ ...event, runId: request.runId }),
       });
       controller.signal.throwIfAborted();
       const latest = this.database.load();
-      if (planningSnapshot(latest) !== snapshot)
+      if (
+        !latest.messages.some((message) => message.id === messageId) ||
+        planningSnapshot(latest) !== snapshot
+      )
         throw new Error("分析期间任务或状态已变化，请根据最新数据重新发送。");
       // 从最后一次读取到事务写入之间无await，取消和其他IPC无法插入半轮提交。
       const next = this.database.commitAgentTurn(
@@ -405,7 +471,10 @@ export class AgentRuntime {
       // provider错误可能包含请求头或响应原文，只对外返回有限的应用错误。
       if (
         error instanceof Error &&
-        /分析期间|模型未生成|对话不存在/.test(error.message)
+        (error.message === retriesExhausted ||
+          /^(分析期间任务或状态已变化|模型未生成可应用的完整结果|对话不存在。$)/.test(
+            error.message,
+          ))
       )
         throw error;
       throw new Error("模型调用或结果校验失败，请检查服务配置，稍后重试。");

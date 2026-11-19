@@ -6,7 +6,9 @@ import {
   type Command,
   type Proposal,
   newTask,
+  newSession,
 } from "./model";
+import { deleteConversation, trimConversations } from "./conversations";
 import { z } from "zod";
 
 function findTask(state: State, id: string) {
@@ -131,22 +133,25 @@ export function applyCommand(previous: State, input: Command): State {
       break;
     }
     case "move": {
-      const indexes = state.arrangements.flatMap((item, index) =>
-        item.date === command.date ? [index] : [],
+      const source = state.arrangements.findIndex(
+        (item) =>
+          item.date === command.date &&
+          !item.done &&
+          item.taskId === command.taskId,
       );
-      const position = indexes.findIndex(
-        (index) => state.arrangements[index].taskId === command.taskId,
+      const target = state.arrangements.findIndex(
+        (item) =>
+          item.date === command.date &&
+          !item.done &&
+          item.taskId === command.targetTaskId,
       );
-      const other = position + (command.direction === "up" ? -1 : 1);
-      if (position >= 0 && other >= 0 && other < indexes.length) {
-        const a = indexes[position],
-          b = indexes[other];
-        [state.arrangements[a], state.arrangements[b]] = [
-          state.arrangements[b],
-          state.arrangements[a],
+      if (source >= 0 && target >= 0 && source !== target) {
+        [state.arrangements[source], state.arrangements[target]] = [
+          state.arrangements[target],
+          state.arrangements[source],
         ];
         findTask(state, command.taskId).version++;
-        findTask(state, state.arrangements[a].taskId).version++;
+        findTask(state, command.targetTaskId).version++;
       }
       break;
     }
@@ -313,9 +318,15 @@ export function applyCommand(previous: State, input: Command): State {
       break;
     }
     case "session": {
-      if (!state.sessions.some((item) => item.id === command.id))
-        state.sessions.push({ id: command.id, title: "新的对话", draft: "" });
       state.activeSessionId = command.id;
+      if (!state.sessions.some((item) => item.id === command.id)) {
+        state.sessions.push(newSession(command.id));
+        trimConversations(state);
+      }
+      break;
+    }
+    case "deleteSession": {
+      deleteConversation(state, command.id);
       break;
     }
   }

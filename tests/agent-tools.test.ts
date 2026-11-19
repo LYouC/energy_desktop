@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
-import { generateAgentTurn } from "../electron/agent/runtime";
+import { AgentRuntime, generateAgentTurn } from "../electron/agent/runtime";
+import { WorkspaceDatabase } from "../electron/storage";
 import { emptyState } from "../shared/model";
 import { applyAgentTurn } from "../shared/agent";
 
@@ -68,6 +69,62 @@ const connection = {
   model: "test",
 };
 const finalText = "已创建整理会议笔记任务，目标是方便检索决定和待办。";
+
+test("最终回复流中断会丢弃半段预览并从决策步骤重试", async (context) => {
+  const db = new WorkspaceDatabase(":memory:");
+  context.after(() => db.close());
+  let steps = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      steps++;
+      if (steps === 1 || steps === 3) return response([prepare]);
+      if (steps === 4) return response([], finalText);
+      return {
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.enqueue({ type: "text-start", id: "partial" });
+            controller.enqueue({
+              type: "text-delta",
+              id: "partial",
+              delta: "半段回复",
+            });
+            controller.enqueue({
+              type: "error",
+              error: new TypeError("terminated"),
+            });
+            controller.close();
+          },
+        }),
+      };
+    },
+  });
+  const runtime = new AgentRuntime(
+    db,
+    () => connection,
+    (options) => generateAgentTurn({ ...options, model }),
+  );
+  const events: string[] = [];
+  const state = await runtime.send(
+    {
+      runId: crypto.randomUUID(),
+      sessionId: db.load().activeSessionId,
+      text: "好，就建这个",
+      focusedId: null,
+    },
+    (event) => {
+      if (event.type === "text") events.push(event.text);
+      if (event.type === "retry") events.push("retry");
+    },
+  );
+  assert.deepEqual(events, ["半段回复", "retry", finalText]);
+  assert.equal(steps, 4);
+  assert.equal(state.tasks.length, 1);
+  assert.deepEqual(
+    state.messages.map(({ text }) => text),
+    ["好，就建这个", finalText],
+  );
+});
 
 test("模型未提交决定时不展示执行完成正文", async () => {
   const model = new MockLanguageModelV4({

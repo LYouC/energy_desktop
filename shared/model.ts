@@ -112,6 +112,7 @@ export const stateSchema = z.object({
       id: z.string(),
       title: z.string(),
       draft: z.string(),
+      createdAt: z.string().optional(),
       agentMemory: agentMemorySchema.optional(),
     }),
   ),
@@ -165,7 +166,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     type: z.literal("move"),
     taskId: z.string(),
     date: z.string(),
-    direction: z.enum(["up", "down"]),
+    targetTaskId: z.string(),
   }),
   z.object({ type: z.literal("proposal"), proposal: proposalSchema }),
   z.object({
@@ -198,6 +199,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     text: z.string(),
   }),
   z.object({ type: z.literal("session"), id: z.string() }),
+  z.object({ type: z.literal("deleteSession"), id: z.string() }),
 ]);
 export type Command = z.infer<typeof commandSchema>;
 export function localDate(date = new Date()) {
@@ -216,15 +218,25 @@ export function newTask(parentId: string | null = null): Task {
     updatedAt: new Date().toISOString(),
   };
 }
+export function newSession(
+  id: string = crypto.randomUUID(),
+): State["sessions"][number] {
+  return {
+    id,
+    title: "新的对话",
+    draft: "",
+    createdAt: new Date().toISOString(),
+  };
+}
 export function emptyState(): State {
-  const id = crypto.randomUUID();
+  const session = newSession();
   return {
     revision: 0,
     tasks: [],
     arrangements: [],
     proposals: [],
-    sessions: [{ id, title: "新的对话", draft: "" }],
-    activeSessionId: id,
+    sessions: [session],
+    activeSessionId: session.id,
     messages: [],
     energy: { value: null, updatedAt: "", source: "用户设置" },
     preferences: "",

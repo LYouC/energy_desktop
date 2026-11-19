@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ref,
+  shallowRef,
   computed,
   watch,
   nextTick,
@@ -20,6 +21,7 @@ import {
 import Button from "./ui/button/Button.vue";
 import Modal from "./Modal.vue";
 import ModelSettings from "./ModelSettings.vue";
+import ChatHistory from "./ChatHistory.vue";
 import { useWorkspace } from "@/stores/workspace";
 import { simulateReply } from "@/features/mock";
 import { buildContext } from "../../shared/context";
@@ -44,6 +46,9 @@ const mode = ref<"real" | "mock">("real");
 const settingsOpen = ref(false);
 const configured = ref(false);
 const runError = ref("");
+type AgentRequest = Parameters<Window["desktop"]["sendAgent"]>[0];
+const retryRequest = shallowRef<AgentRequest>();
+const retryStatus = ref("");
 const streamText = ref("");
 const submittedText = ref("");
 const runStatus = ref("");
@@ -67,6 +72,8 @@ watch(
   sessionId,
   () => {
     cancel();
+    runError.value = "";
+    retryRequest.value = undefined;
     draft.value =
       store.state.sessions.find((item) => item.id === sessionId.value)?.draft ||
       "";
@@ -138,6 +145,7 @@ async function cancel() {
   streamText.value = "";
   submittedText.value = "";
   runStatus.value = "";
+  retryStatus.value = "";
 }
 async function message(
   role: "user" | "assistant",
@@ -157,6 +165,62 @@ async function message(
     },
   });
 }
+async function sendReal(request: AgentRequest, isRetry = false) {
+  if (running.value || request.sessionId !== sessionId.value) return;
+  running.value = true;
+  const token = ++generation;
+  runError.value = "";
+  retryRequest.value = undefined;
+  if (!isRetry) {
+    try {
+      await store.dispatch({
+        type: "draft",
+        sessionId: request.sessionId,
+        text: request.text,
+      });
+    } catch {
+      if (token === generation) {
+        runError.value = "消息保存失败，请重试。";
+        running.value = false;
+      }
+      return;
+    }
+    if (token !== generation) return;
+    draft.value = "";
+  }
+  activeRunId = request.runId;
+  if (!messages.value.some((message) => message.id === `${request.runId}:user`))
+    submittedText.value = request.text;
+  runStatus.value = "正在读取上下文…";
+  let failed = false;
+  try {
+    runPromise = window.desktop.sendAgent(request);
+    await runPromise;
+  } catch {
+    failed = true;
+  } finally {
+    if (token === generation) {
+      await store.load();
+      if (token !== generation) return;
+      if (
+        failed &&
+        !messages.value.some(
+          (message) => message.id === `${request.runId}:assistant`,
+        )
+      ) {
+        runError.value = "本轮未完成。你可以重试，或检查网络和模型设置。";
+        retryRequest.value = request;
+      }
+      activeRunId = null;
+      runPromise = null;
+      running.value = false;
+      submittedText.value = "";
+      streamText.value = "";
+      runStatus.value = "";
+      retryStatus.value = "";
+    }
+  }
+}
 async function send() {
   if (!draft.value.trim() || running.value) return;
   if (mode.value === "real" && !configured.value) {
@@ -165,44 +229,20 @@ async function send() {
   }
   const text = draft.value.trim(),
     id = sessionId.value;
+  if (mode.value === "real") {
+    await sendReal({
+      runId: crypto.randomUUID(),
+      sessionId: id,
+      text,
+      focusedId: props.focusedId,
+    });
+    return;
+  }
   running.value = true;
   const token = ++generation;
   runError.value = "";
   streamText.value = "";
   try {
-    if (mode.value === "real") {
-      // 先排空草稿保存队列。真实消息由后端统一保存，防止前后端重复追加。
-      await store.dispatch({ type: "draft", sessionId: id, text });
-      if (token !== generation) return;
-      const runId = crypto.randomUUID();
-      activeRunId = runId;
-      submittedText.value = text;
-      draft.value = "";
-      runStatus.value = "正在读取上下文…";
-      runPromise = window.desktop.sendAgent({
-        runId,
-        sessionId: id,
-        text,
-        focusedId: props.focusedId,
-      });
-      try {
-        await runPromise;
-      } catch {
-        if (token === generation)
-          runError.value =
-            "本次调用未完成，请检查模型设置或网络。已保存的操作可在任务中查看。";
-      } finally {
-        await store.load();
-        if (token === generation) {
-          activeRunId = null;
-          running.value = false;
-          submittedText.value = "";
-          streamText.value = "";
-          runStatus.value = "";
-        }
-      }
-      return;
-    }
     await message("user", text, id);
     if (token !== generation) return;
     draft.value = "";
@@ -313,7 +353,10 @@ onMounted(() => {
     if (event.runId !== activeRunId) return;
     // 流式文字仅供预览。完整回复及正式变更由本地执行层提交后重新读取。
     if (event.type === "text") streamText.value += event.text;
-    else runStatus.value = event.text;
+    else if (event.type === "retry") {
+      streamText.value = "";
+      retryStatus.value = event.text;
+    } else runStatus.value = event.text;
   });
 });
 onBeforeUnmount(() => {
@@ -460,10 +503,24 @@ onBeforeUnmount(() => {
         <div v-if="streamText" class="message assistant">
           <p>{{ streamText }}</p>
         </div>
-        <p v-if="running" class="muted">
-          {{ mode === "mock" ? "正在准备模拟方案…" : runStatus || "正在分析…" }}
+        <p v-if="running" class="muted" role="status">
+          {{
+            mode === "mock"
+              ? "正在准备模拟方案…"
+              : retryStatus || runStatus || "正在分析…"
+          }}
         </p>
-        <p v-if="runError" class="error" role="alert">{{ runError }}</p>
+        <div v-if="runError" class="chat-error">
+          <p class="error" role="alert">{{ runError }}</p>
+          <Button
+            v-if="retryRequest"
+            variant="outline"
+            :disabled="running"
+            @click="sendReal(retryRequest, true)"
+          >
+            重试本轮
+          </Button>
+        </div>
       </div>
       <div class="chat-bottom">
         <div class="presets">
@@ -514,26 +571,14 @@ onBeforeUnmount(() => {
           </div>
         </form>
         <div class="chat-footer">
-          <select v-model="mode" aria-label="对话模式" :disabled="running">
-            <option value="real">真实 Agent</option>
-            <option value="mock">本地模拟</option></select
-          ><span>Ctrl + Enter 发送</span>
+          <span>Ctrl + Enter 发送</span>
         </div>
       </div>
-      <Modal
+      <ChatHistory
         v-model:open="history"
-        title="对话历史"
-        description="新对话共享最新任务、能量和明确偏好。"
-        ><div class="history-list">
-          <Button
-            v-for="session in store.state.sessions"
-            :key="session.id"
-            variant="outline"
-            @click="switchSession(session.id)"
-            >{{ session.title }}</Button
-          >
-        </div></Modal
-      >
+        :running="running"
+        @select="switchSession"
+      />
       <Modal
         v-model:open="contextOpen"
         title="当前上下文预览"
@@ -546,12 +591,14 @@ onBeforeUnmount(() => {
   </aside>
 </template>
 <style scoped>
-.chat-footer {
-  align-items: center;
+.chat-error {
+  display: grid;
+  justify-items: start;
   gap: 8px;
 }
-.chat-footer select {
-  font-size: 11px;
-  padding: 4px 6px;
+.chat-footer {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

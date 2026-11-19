@@ -14,9 +14,17 @@ import { statusLabels, type Task, type Arrangement } from "../../shared/model";
 const props = defineProps<{
   task: Task;
   arrangement: Arrangement;
-  focus: boolean;
+  focus?: boolean;
+  previousTaskId?: string;
+  nextTaskId?: string;
+  selectable?: boolean;
+  selected?: boolean;
 }>();
-defineEmits<{ edit: [task: Task]; focusTask: [id: string] }>();
+defineEmits<{
+  edit: [task: Task];
+  focusTask: [id: string];
+  select: [id: string];
+}>();
 const store = useWorkspace();
 const children = computed(() =>
   store.state.tasks.filter((task) => task.parentId === props.task.id),
@@ -31,13 +39,14 @@ async function stage() {
     });
   } catch {}
 }
-async function move(direction: "up" | "down") {
+async function move(targetTaskId: string | undefined) {
+  if (!targetTaskId) return;
   try {
     await store.dispatch({
       type: "move",
       taskId: props.task.id,
       date: props.arrangement.date,
-      direction,
+      targetTaskId,
     });
   } catch {}
 }
@@ -52,7 +61,23 @@ async function unschedule() {
 }
 </script>
 <template>
+  <button
+    v-if="selectable"
+    type="button"
+    :class="['task-card', 'select-card', { selected }]"
+    :aria-pressed="selected"
+    @click="$emit('select', task.id)"
+  >
+    <span class="select-box" :class="{ checked: selected }">
+      <Check v-if="selected" :size="12" />
+    </span>
+    <span class="select-copy">
+      <span class="select-title">{{ task.title }}</span>
+      <small>{{ arrangement.scope }}</small>
+    </span>
+  </button>
   <article
+    v-else
     :class="['task-card', { focused: focus, 'stage-done': arrangement.done }]"
   >
     <div v-if="focus" class="eyebrow">当前聚焦</div>
@@ -77,7 +102,10 @@ async function unschedule() {
             <template v-if="task.expectedDate"
               >预计完成 {{ task.expectedDate }}</template
             > </span
-          ><span>{{ statusLabels[task.status] }}</span>
+          ><span
+            >{{ arrangement.done ? "整体任务：" : ""
+            }}{{ statusLabels[task.status] }}</span
+          >
         </div>
       </div>
       <button
@@ -89,9 +117,6 @@ async function unschedule() {
       </button>
     </div>
     <p class="stage-goal">今日目标 · {{ arrangement.scope }}</p>
-    <p v-if="arrangement.done" class="muted">
-      今日阶段已完成 · 整体任务状态为{{ statusLabels[task.status] }}
-    </p>
     <template v-if="focus">
       <button
         v-for="child in children"
@@ -110,20 +135,28 @@ async function unschedule() {
       </p>
     </template>
     <div class="task-footer">
-      <Button v-if="!focus" variant="ghost" @click="$emit('focusTask', task.id)"
+      <Button
+        v-if="!focus && !arrangement.done"
+        variant="ghost"
+        @click="$emit('focusTask', task.id)"
         >聚焦这件事</Button
-      ><span v-else class="muted">{{
-        children.length
-          ? `${children.filter((t) => t.status === "done").length} / ${children.length} 子任务完成`
-          : "按本次阶段目标推进"
+      ><span v-else-if="focus && children.length" class="muted">{{
+        `${children.filter((child) => child.status === "done").length} / ${children.length} 子任务完成`
       }}</span>
-      <div class="row">
-        <button class="icon-button" aria-label="上移安排" @click="move('up')">
-          <ArrowUp :size="14" /></button
-        ><button
+      <div class="row task-actions">
+        <button
+          v-if="previousTaskId"
+          class="icon-button"
+          aria-label="上移安排"
+          @click="move(previousTaskId)"
+        >
+          <ArrowUp :size="14" />
+        </button>
+        <button
+          v-if="nextTaskId"
           class="icon-button"
           aria-label="下移安排"
-          @click="move('down')"
+          @click="move(nextTaskId)"
         >
           <ArrowDown :size="14" /></button
         ><Button variant="ghost" @click="unschedule">移出当日</Button>

@@ -19,7 +19,7 @@
 | 业务模型与操作 | 任务、阶段安排、方案接受、关系校验、能量与会话操作 | `shared/model.ts`、`shared/operations.ts`；`shared/README.md` |
 | 桌面与本地保存 | 隔离 IPC、SQLite 事务、v1→v2 任务字段迁移及版本检查 | `electron/main.ts`、`electron/storage.ts`、`electron/migrations.ts`；`electron/README.md` |
 | 工作台 | 三栏、任务详情、今日安排、双主题与界面状态 | `src/App.vue`、`src/stores/workspace.ts`；`src/README.md` |
-| 模拟会话与上下文 | 模板回复、方案展示、会话与草稿、上下文预览 | `src/components/ChatPanel.vue`、`src/features/mock.ts`；`src/features/README.md` |
+| 对话与历史 | 回复、会话草稿、分页管理、上下文预览 | `src/components/ChatPanel.vue`、`src/components/ChatHistory.vue`、`shared/conversations.ts`；`src/features/README.md` |
 | Agent 运行与模型配置 | AI SDK 单循环、语义决策、历史查询与会话记忆、工具回执与整轮提交、系统保护凭据 | `electron/agent/runtime.ts`、`shared/agent.ts`、`shared/context.ts`、`src/components/ModelSettings.vue`；`electron/agent/README.md` |
 
 ## 约束

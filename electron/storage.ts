@@ -7,6 +7,7 @@ import {
 } from "../shared/model";
 import { applyCommand } from "../shared/operations";
 import { applyAgentTurn } from "../shared/agent";
+import { conversationLimit, trimConversations } from "../shared/conversations";
 import { migrateWorkspaceV1 } from "./migrations";
 
 export class WorkspaceDatabase {
@@ -44,7 +45,13 @@ export class WorkspaceDatabase {
           "INSERT OR IGNORE INTO workspace (id, revision, payload) VALUES (1, ?, ?)",
         )
         .run(initial.revision, JSON.stringify(initial));
-      this.load();
+      const state = this.load();
+      if (state.sessions.length > conversationLimit)
+        this.transact(state.revision, (previous) => {
+          trimConversations(previous);
+          previous.revision++;
+          return previous;
+        });
     } catch (error) {
       this.db.close();
       throw error;

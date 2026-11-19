@@ -15,7 +15,6 @@ const page = await app.firstWindow();
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 try {
-  await expect(page.getByLabel("对话模式")).toHaveValue("real");
   await page.getByLabel("和息序聊聊").fill("帮我推进报告");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const dialog = page.getByRole("dialog");
@@ -37,9 +36,26 @@ try {
   // 测试传输只生成固定片段，避免 UI 回归触发真实模型调用。
   await app.evaluate(({ ipcMain }) => {
     let pending;
+    let retryId;
     ipcMain.removeHandler("agent:send");
     ipcMain.removeHandler("agent:cancel");
     ipcMain.handle("agent:send", (event, request) => {
+      if (request.text === "重试测试") {
+        if (!retryId) {
+          retryId = request.runId;
+          for (const chunk of [
+            { type: "text", text: "失败的半段文字" },
+            { type: "retry", text: "正在自动重试（3/3）…" },
+          ])
+            event.sender.send("agent:event", {
+              runId: request.runId,
+              ...chunk,
+            });
+          throw new Error("测试网络失败");
+        }
+        if (retryId !== request.runId) throw new Error("重试没有复用标识");
+        return null;
+      }
       event.sender.send("agent:event", {
         runId: request.runId,
         type: "status",
@@ -86,6 +102,17 @@ try {
     (await page.evaluate(() => window.desktop.load())).sessions,
   ).toHaveLength(2);
   await page.screenshot({ path: "test-results/agent-new-session.png" });
+
+  await page.getByLabel("和息序聊聊").fill("重试测试");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  const retry = page.getByRole("button", { name: "重试本轮" });
+  await expect(retry).toBeVisible();
+  await expect(page.getByText("失败的半段文字")).toHaveCount(0);
+  await page.getByLabel("和息序聊聊").fill("保留新的草稿");
+  await retry.click();
+  await expect(page.getByLabel("和息序聊聊")).toBeEnabled();
+  await expect(retry).toHaveCount(0);
+  await expect(page.getByLabel("和息序聊聊")).toHaveValue("保留新的草稿");
 
   // 新字段需要在待接受方案中可见，并通过同一个接受入口写入任务。
   await page.evaluate(async () => {
@@ -158,9 +185,36 @@ try {
   expect(applied.tasks[0].startDate).toBe("2026-11-19");
   expect(applied.tasks[0].expectedDate).toBe("2026-11-21");
   expect(applied.arrangements).toHaveLength(0);
+
+  await page.evaluate(async () => {
+    let state = await window.desktop.load();
+    for (let index = 0; index < 4; index++) {
+      state = await window.desktop.execute(state.revision, {
+        type: "session",
+        id: crypto.randomUUID(),
+      });
+    }
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "对话历史", exact: true }).click();
+  await dialog.getByLabel("每页对话数").selectOption("5");
+  await expect(dialog.getByRole("listitem")).toHaveCount(5);
+  await expect(dialog.locator("time").first()).toHaveAttribute("datetime", /T/);
+  await dialog.getByRole("button", { name: "下一页" }).click();
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await dialog.getByRole("button", { name: /^删除对话：/ }).click();
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await dialog.getByRole("button", { name: /^删除对话：/ }).click();
+  await dialog.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(dialog.getByRole("listitem")).toHaveCount(5);
+  await expect(dialog.getByRole("button", { name: "下一页" })).toBeDisabled();
+  const afterDeletion = await page.evaluate(() => window.desktop.load());
+  expect(afterDeletion.sessions).toHaveLength(5);
+  expect(afterDeletion.tasks).toEqual(applied.tasks);
   expect(errors).toEqual([]);
   console.log(
-    "PASS: no-key entry, secret input clearing, public config, stream preview, cancellation, session switch, new-field proposal display and acceptance; no model requests",
+    "PASS: model settings, stream preview, cancellation, same-turn retry, session switch, proposal acceptance, history pagination and deletion; no model requests",
   );
 } finally {
   await app.close();

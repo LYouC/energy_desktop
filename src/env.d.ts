@@ -23,7 +23,7 @@ interface Window {
     onAgentEvent(
       callback: (event: {
         runId: string;
-        type: "text" | "status";
+        type: "text" | "status" | "retry";
         text: string;
       }) => void,
     ): () => void;

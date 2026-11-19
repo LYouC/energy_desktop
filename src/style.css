@@ -307,7 +307,7 @@ nav button span {
   align-items: center;
   justify-content: space-between;
   padding: 0 35px;
-  min-height: 61px;
+  min-height: 44px;
   color: var(--text);
   font-size: 12px;
 }
@@ -320,24 +320,38 @@ nav button span {
   font-size: 11px;
 }
 .main-scroll {
-  padding: 22px 40px 40px;
+  padding: 16px 40px 40px;
   overflow: auto;
 }
 .page-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 15px;
-  margin-bottom: 28px;
+  gap: 10px 15px;
+  margin-bottom: 22px;
+}
+.page-heading-copy {
+  min-width: 0;
+}
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.today-heading {
+  margin-bottom: 16px;
 }
 .date {
   color: var(--muted);
   font-size: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 .subtitle {
   color: var(--text);
-  margin-top: 10px;
+  margin-top: 6px;
   font-size: 13px;
 }
 .day-stamp {
@@ -360,10 +374,10 @@ nav button span {
   border: 1px solid var(--line);
   border-radius: 12px;
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
-  padding: 17px;
-  margin-bottom: 28px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
   color: var(--accent);
 }
 .eyebrow {
@@ -388,19 +402,77 @@ nav button span {
 }
 .section-heading {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
+}
+.today-plan {
+  display: grid;
+  gap: 16px;
+}
+.today-plan.selecting {
+  gap: 10px;
+}
+.today-plan.selecting section {
+  display: grid;
+  gap: 8px;
+}
+.remaining-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.rest-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.today-finished {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent);
+}
+.today-completed {
+  border-block: 1px solid var(--line);
+}
+.today-completed summary {
+  padding: 10px 2px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.today-completed summary span {
+  margin-left: 6px;
+}
+.today-completed .task-card {
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
 }
 .task-card {
   border-bottom: 1px solid var(--line);
-  padding: 20px 3px;
-  margin-bottom: 14px;
+  padding: 8px 2px;
 }
 .task-card.focused {
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--surface);
-  padding: 18px;
+  padding: 12px 14px;
+}
+.task-card.focused .task-name {
+  font-size: 17px;
+}
+.task-card.focused .eyebrow {
+  color: var(--accent);
+  margin-bottom: 6px;
 }
 .task-head {
   display: flex;
@@ -426,7 +498,7 @@ nav button span {
   gap: 10px;
   font-size: 11px;
   color: var(--text);
-  margin-top: 6px;
+  margin-top: 2px;
 }
 .task-meta span {
   display: inline-flex;
@@ -440,12 +512,22 @@ nav button span {
   padding: 4px 0;
 }
 .stage-goal {
+  margin: 5px 0 0 26px;
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.focused .stage-goal {
   background: var(--energy);
   border-radius: 6px;
-  padding: 8px 10px;
-  margin: 14px 0 12px 26px;
+  padding: 6px 8px;
+  margin-top: 8px;
   color: var(--accent);
-  font-size: 12px;
+}
+.stage-done .task-name,
+.stage-done .task-meta,
+.stage-done .stage-goal {
+  color: var(--muted);
 }
 .stage-done .stage-goal {
   text-decoration: line-through;
@@ -459,7 +541,7 @@ nav button span {
   gap: 9px;
   align-items: center;
   text-align: left;
-  padding: 8px 0;
+  padding: 5px 0;
   color: var(--text);
 }
 .child-row small {
@@ -472,26 +554,25 @@ nav button span {
 }
 .background-preview {
   white-space: pre-wrap;
-  margin: 5px 0 12px 26px;
+  margin: 6px 0 0 26px;
   overflow-wrap: anywhere;
 }
 .task-footer {
-  border-top: 1px solid var(--line);
-  margin: 12px 0 0 26px;
-  padding-top: 10px;
+  margin: 4px 0 0 26px;
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
 }
-.pause {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  padding: 7px 0 22px;
+.task-actions {
+  margin-left: auto;
+}
+.task-footer .button-ghost {
+  min-height: 26px;
+  padding: 3px 6px;
+}
+.notice.today-notice {
+  margin: 16px 0 0;
 }
 .empty-state {
   display: flex;
@@ -509,15 +590,132 @@ nav button span {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 22px;
+  gap: 6px;
+  min-height: 35px;
+  margin-bottom: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
   color: var(--muted);
 }
+.search:focus-within {
+  border-color: var(--control);
+}
 .search input {
+  width: 150px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+.manage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.manage-count strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+.manage-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.manage-total {
+  color: var(--muted);
+}
+.manage-spacer {
+  flex: 1;
+}
+.manage-bar .button {
+  min-height: 29px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.select-box {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid var(--control);
+  border-radius: 4px;
+  color: var(--button-ink);
+}
+.select-box.checked {
+  background: var(--button);
+  border-color: var(--button);
+}
+.task-list-row.selected {
+  background: var(--energy);
+  border-radius: 6px;
+}
+.task-card.select-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+.task-card.select-card.selected {
+  border-color: var(--control);
+  background: var(--energy);
+}
+.select-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.select-title {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.select-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.delete-summary {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--energy);
+}
+.delete-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+}
+.delete-list li {
+  overflow-wrap: anywhere;
+}
+.confirm-actions {
+  justify-content: flex-end;
 }
 .list-heading {
   display: flex;
@@ -871,12 +1069,6 @@ select[multiple] {
   background: none;
   border: 0;
 }
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 20px;
-}
 .context-preview {
   font-size: 12px;
   white-space: pre-wrap;
@@ -889,7 +1081,7 @@ select[multiple] {
     --chat-w: 410px;
   }
   .main-scroll {
-    padding: 28px 60px 40px;
+    padding: 18px 60px 40px;
   }
 }
 @media (max-width: 1200px) {
@@ -900,7 +1092,10 @@ select[multiple] {
     --chat-w: 330px;
   }
   .main-scroll {
-    padding: 20px 25px 35px;
+    padding: 14px 25px 35px;
+  }
+  .search input {
+    width: 120px;
   }
   .sidebar {
     padding-inline: 14px;
@@ -917,6 +1112,9 @@ select[multiple] {
   .app-shell {
     --sidebar-expanded: 180px;
     --workspace-min: 300px;
+  }
+  .today-heading h1 {
+    font-size: 24px;
   }
   .sidebar {
     position: sticky;
@@ -956,7 +1154,18 @@ select[multiple] {
     margin-bottom: 12px;
   }
   .main-scroll {
-    padding: 20px;
+    padding: 14px 20px 20px;
+  }
+  .page-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .search input {
+    width: 100%;
+    flex: 1;
+  }
+  .search {
+    flex: 1;
   }
 
   .form-grid {
