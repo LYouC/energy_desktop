@@ -10,8 +10,8 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] },
+    "paths": { "@/*": ["src/renderer/*"] },
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "electron/**/*.ts", "shared/**/*.ts", "tests/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
 }

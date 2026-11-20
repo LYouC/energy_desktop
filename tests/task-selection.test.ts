@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deletionOrder } from "../src/composables/taskSelection";
-import type { Task } from "../shared/model";
+import { deletionOrder } from "../src/renderer/composables/taskSelection";
+import type { Task } from "../src/domain/model";
 
 function task(id: string, parentId: string | null = null): Task {
   return {

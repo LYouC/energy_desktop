@@ -1,12 +1,12 @@
-import { buildContext } from "../../shared/context";
+import { buildContext } from "../../src/agent/context";
 import {
   localDate,
   type State,
   type Proposal,
   type Change,
-} from "../../shared/model";
+} from "../../src/domain/model";
 
-// 确定性的模拟交互，用于界面回归；真实推理由 electron/agent 执行。
+// 确定性的模拟交互，供工作区回归测试构造回复和方案。
 export function simulateReply(
   state: State,
   sessionId: string,

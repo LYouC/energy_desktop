@@ -1,4 +1,3 @@
-import { safeStorage } from "electron";
 import {
   existsSync,
   readFileSync,
@@ -20,11 +19,20 @@ const configSchema = z.object({
   model: z.string().trim().min(1).max(200),
   encryptedKey: z.string().optional(),
 });
+type CredentialProtection = {
+  isEncryptionAvailable(): boolean;
+  encryptString(value: string): Buffer;
+  decryptString(value: Buffer): string;
+};
+
 export class AgentConfig {
   private filename: string;
   private config: z.infer<typeof configSchema>;
   private loadError = "";
-  constructor(directory: string) {
+  constructor(
+    directory: string,
+    private readonly protection: CredentialProtection,
+  ) {
     mkdirSync(directory, { recursive: true });
     this.filename = path.join(directory, "model-config.json");
     this.config = {
@@ -47,9 +55,9 @@ export class AgentConfig {
   }
   private key() {
     if (this.config.encryptedKey) {
-      if (!safeStorage.isEncryptionAvailable())
+      if (!this.protection.isEncryptionAvailable())
         throw new Error("系统凭据保护不可用。");
-      return safeStorage.decryptString(
+      return this.protection.decryptString(
         Buffer.from(this.config.encryptedKey, "base64"),
       );
     }
@@ -78,9 +86,9 @@ export class AgentConfig {
       throw new Error("更换服务地址时请同时输入对应 Key。");
     let encryptedKey = this.config.encryptedKey;
     if (parsed.apiKey) {
-      if (!safeStorage.isEncryptionAvailable())
+      if (!this.protection.isEncryptionAvailable())
         throw new Error("系统凭据保护不可用。");
-      encryptedKey = safeStorage
+      encryptedKey = this.protection
         .encryptString(parsed.apiKey)
         .toString("base64");
     }

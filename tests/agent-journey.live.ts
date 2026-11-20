@@ -2,15 +2,15 @@
 // node --import tsx tests/agent-journey.live.ts
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { generateAgentTurn } from "../electron/agent/runtime";
-import { applyAgentTurn, type AgentTurn } from "../shared/agent";
-import { applyCommand } from "../shared/operations";
+import { generateAgentTurn } from "../src/agent/runtime";
+import { applyAgentTurn, type AgentTurn } from "../src/agent/turn";
+import { applyCommand } from "../src/domain/operations";
 import {
   emptyState,
   localDate,
   stateSchema,
   type State,
-} from "../shared/model";
+} from "../src/domain/model";
 
 process.loadEnvFile(".env.agent.local");
 const connection = {

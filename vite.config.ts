@@ -4,15 +4,24 @@ import tailwindcss from "@tailwindcss/vite";
 import electron from "vite-plugin-electron/simple";
 import { fileURLToPath } from "node:url";
 
+const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+const rendererRoot = fileURLToPath(new URL("./src/renderer", import.meta.url));
+
 export default defineConfig({
+  root: rendererRoot,
+  envDir: projectRoot,
   base: "./",
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  build: {
+    outDir: fileURLToPath(new URL("./dist", import.meta.url)),
+    emptyOutDir: true,
+  },
+  resolve: { alias: { "@": rendererRoot } },
   plugins: [
     vue(),
     tailwindcss(),
     electron({
-      main: { entry: "electron/main.ts" },
-      preload: { input: "electron/preload.ts" },
+      main: { entry: "src/desktop/main.ts", vite: { root: projectRoot } },
+      preload: { input: "src/desktop/preload.ts", vite: { root: projectRoot } },
     }),
   ],
 });

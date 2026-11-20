@@ -1,6 +1,15 @@
 # Agent 运行服务
 
-`runtime.ts` 使用 AI SDK Core 的 `streamText` 作为唯一工具循环，`prompt.ts` 保存行为指令，`config.ts` 管理用户模型配置和系统保护的凭据。
+| 文件                       | 内容                                                                                                                       |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| [runtime.ts](runtime.ts)   | `generateAgentTurn` 用 AI SDK Core 的 `streamText` 执行工具循环。`AgentRuntime` 管理请求、运行事件、重试、取消和整轮提交。 |
+| [prompt.ts](prompt.ts)     | 息序的角色、任务、行为指令与示例。                                                                                         |
+| [config.ts](config.ts)     | `AgentConfig` 管理模型地址、模型名和凭据，公开视图只传出 Key 是否可用。                                                    |
+| [turn.ts](turn.ts)         | 定义模型动作及整轮结果的 schema，通过 `applyAgentTurn` 把动作应用成业务状态。                                              |
+| [context.ts](context.ts)   | 组装当前会话、任务和安排的上下文，按游标读取同会话历史。界面预览共用 `buildContext`。                                      |
+| [capacity.ts](capacity.ts) | 根据分钟估时计算总量、缺口、单项容量和条件性分配，预留 15 分钟缓冲。                                                       |
+
+本模块复用[领域模型与命令](../domain/README.md)。运行层接收工作区读写接口，由[桌面宿主](../desktop/README.md)接入 SQLite 和 IPC。配置从宿主接收凭据加密能力。
 
 ## 调用与数据流
 
@@ -27,7 +36,7 @@ SiliconFlow 继续使用已验证的 `enable_thinking:false` 工具调用配置�
 
 `prepareTurn.actions` 支持八种动作。`createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增安排或移期，`updateArrangement` 修改已有安排，`unschedule` 取消安排，`stage` 完成或恢复当日阶段，`resolve` 接受或拒绝方案条目。它们共用同一业务应用器。
 
-`shared/agent.ts` 定义创建、修改、安排、取消安排、阶段完成、拆分和方案接受等有限动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。关键词与逐字抄写不参与执行拦截。新增计划建议保存为待接受方案，已授权操作直接执行。
+`turn.ts` 定义这些动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。新增计划建议保存为待接受方案，已授权操作直接执行。
 
 任务与子任务使用 `title/status/startDate/expectedDate/description/parentId`。创建和修改的 patch 及会话 taskDraft 使用这些字段，工具回执与草稿展示同步返回预计日期和说明。`split.children` 支持名称、说明、状态和预计日期，父任务由 split.taskId 确定。`createTask.ref` 可供同批动作的 taskId 和 patch.parentId 引用。持久化层读取旧拆分时将 goal 转入说明，模型工具对旧字段报错，供同一循环修正。
 

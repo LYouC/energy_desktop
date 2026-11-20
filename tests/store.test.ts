@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPinia, setActivePinia } from "pinia";
-import { useWorkspace } from "../src/stores/workspace";
-import { emptyState, newTask, type Command } from "../shared/model";
-import { applyCommand } from "../shared/operations";
+import { useWorkspace } from "../src/renderer/stores/workspace";
+import { emptyState, newTask, type Command } from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
 
 test("排队写入捕获提交时的输入快照", async () => {
   let persisted = emptyState();

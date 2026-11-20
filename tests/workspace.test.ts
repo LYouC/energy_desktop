@@ -9,11 +9,11 @@ import {
   newTask,
   type State,
   type Proposal,
-} from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { buildContext } from "../shared/context";
-import { WorkspaceDatabase } from "../electron/storage";
-import { simulateReply } from "../src/features/mock";
+} from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
+import { buildContext } from "../src/agent/context";
+import { WorkspaceDatabase } from "../src/persistence/storage";
+import { simulateReply } from "./fixtures/mock-agent";
 
 function taskState() {
   return applyCommand(emptyState(), {

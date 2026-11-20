@@ -6,10 +6,10 @@ import {
   localDate,
   type State,
   type Proposal,
-} from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { WorkspaceDatabase } from "../electron/storage";
-import { buildContext } from "../shared/context";
+} from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
+import { WorkspaceDatabase } from "../src/persistence/storage";
+import { buildContext } from "../src/agent/context";
 
 function fixture() {
   let state = emptyState();

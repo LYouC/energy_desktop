@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import {
   conversationHistory,
   conversationLimit,
-} from "../shared/conversations";
-import { emptyState, newTask } from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { WorkspaceDatabase } from "../electron/storage";
+} from "../src/domain/conversations";
+import { emptyState, newTask } from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
+import { WorkspaceDatabase } from "../src/persistence/storage";
 
 test("删除当前会话只清理会话数据，选中最近会话并在删空时补一条", (context) => {
   const db = new WorkspaceDatabase(":memory:");

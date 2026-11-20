@@ -2,10 +2,15 @@
 // node --import tsx tests/agent.live.ts；会调用已配置服务并产生费用。
 import { mkdirSync, writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { generateAgentTurn } from "../electron/agent/runtime";
-import { applyAgentTurn } from "../shared/agent";
-import { applyCommand } from "../shared/operations";
-import { emptyState, newTask, localDate, type State } from "../shared/model";
+import { generateAgentTurn } from "../src/agent/runtime";
+import { applyAgentTurn } from "../src/agent/turn";
+import { applyCommand } from "../src/domain/operations";
+import {
+  emptyState,
+  newTask,
+  localDate,
+  type State,
+} from "../src/domain/model";
 process.loadEnvFile(".env.agent.local");
 const connection = {
   apiKey: process.env.XIXU_API_KEY!,

@@ -1,5 +1,18 @@
 # 原型阶段验证
 
+## 2026-11-20 源码目录重构
+
+应用源码移入 `src/` 下五个模块。模拟回复移入 `tests/fixtures/mock-agent.ts`，只供工作区测试。评审前跑通离线测试和桌面流程。一次并行评审核对实现边界、需求与文档，随后修正 Agent 授权流程示例并补齐验证记录。
+
+评审后复测通过：
+
+- `npm test` 的 95 项离线用例及 `npm run format:check`。
+- Vite 开发服务启动 Electron，Vue 界面通过 preload 和 IPC 初始化隔离的 SQLite 工作区。
+- `npm run test:desktop` 内的类型检查、生产构建及五组桌面脚本，覆盖任务、主题、对话、今日安排和重启恢复。
+- `npm run pack` 与 `node tests/pack.smoke.mjs`。目录包可独立启动，Agent IPC、模型设置与 SQLite 可用。另用占位凭据验证 `safeStorage` 加密写入和重启读取。
+
+桌面和打包检查使用隔离工作区。本轮真实模型回复质量沿用既有验证记录，复测使用模拟传输和占位凭据。
+
 ## 2026-11-18 今日安排版面
 
 85 项离线回归通过。最终标准构建和 `node tests/today.desktop.mjs` 在只包含本次补丁的隔离副本通过，避免受并行聊天历史改动影响。Electron 使用隔离数据验证空状态、聚焦置顶、待推进排序、查看详情不抢焦点、完成后自动切换、全部完成与恢复阶段。复核了浅深主题与 800px 窄窗口，截图写入 `test-results/today-*.png`。未调用真实模型，未重打 Windows 发布包。

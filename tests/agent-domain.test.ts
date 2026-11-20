@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, newTask, stateSchema } from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { agentTurnSchema, applyAgentTurn } from "../shared/agent";
-import { WorkspaceDatabase } from "../electron/storage";
-import { buildContext, readConversation } from "../shared/context";
+import { emptyState, newTask, stateSchema } from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
+import { agentTurnSchema, applyAgentTurn } from "../src/agent/turn";
+import { WorkspaceDatabase } from "../src/persistence/storage";
+import { buildContext, readConversation } from "../src/agent/context";
 
 function fixture() {
   return applyCommand(emptyState(), {

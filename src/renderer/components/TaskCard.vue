@@ -10,7 +10,7 @@ import {
 } from "lucide-vue-next";
 import Button from "./ui/button/Button.vue";
 import { useWorkspace } from "@/stores/workspace";
-import { statusLabels, type Task, type Arrangement } from "../../shared/model";
+import { statusLabels, type Task, type Arrangement } from "../../domain/model";
 const props = defineProps<{
   task: Task;
   arrangement: Arrangement;

@@ -8,8 +8,8 @@ import {
   type State,
   type Proposal,
   type Change,
-} from "./model";
-import { applyCommand } from "./operations";
+} from "../domain/model";
+import { applyCommand } from "../domain/operations";
 
 const authorization = {
   mode: z

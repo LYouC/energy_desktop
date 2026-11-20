@@ -8,15 +8,11 @@ import {
 import { setTimeout as delay } from "node:timers/promises";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
-import {
-  agentTurnSchema,
-  applyAgentTurn,
-  type AgentTurn,
-} from "../../shared/agent";
-import { buildContext, readConversation } from "../../shared/context";
-import { localDate, type Command, type State } from "../../shared/model";
+import { agentTurnSchema, applyAgentTurn, type AgentTurn } from "./turn";
+import { buildContext, readConversation } from "./context";
+import { localDate, type Command, type State } from "../domain/model";
 import { agentInstructions } from "./prompt";
-import { capacitySchema, calculateCapacity } from "../../shared/capacity";
+import { capacitySchema, calculateCapacity } from "./capacity";
 
 const decisionSchema = z
   .object({

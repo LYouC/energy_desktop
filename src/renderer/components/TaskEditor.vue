@@ -8,7 +8,7 @@ import {
   localDate,
   statusLabels,
   type Task,
-} from "../../shared/model";
+} from "../../domain/model";
 const props = defineProps<{ task: Task }>();
 const emit = defineEmits<{ close: []; edit: [task: Task] }>();
 const store = useWorkspace();

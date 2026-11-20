@@ -5,8 +5,8 @@ import {
   planningSnapshot,
   type Connection,
   type generateAgentTurn,
-} from "../electron/agent/runtime";
-import { WorkspaceDatabase } from "../electron/storage";
+} from "../src/agent/runtime";
+import { WorkspaceDatabase } from "../src/persistence/storage";
 import { mkdtempSync, rmSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

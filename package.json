@@ -15,8 +15,8 @@
     "test:agent:live": "node --import tsx tests/agent.live.ts",
     "test:agent:journey": "node --import tsx tests/agent-journey.live.ts",
     "test:agent:behavior": "node --import tsx tests/agent-behavior.live.ts",
-    "format:check": "prettier --check src shared electron tests vite.config.ts",
-    "format": "prettier --write src shared electron tests vite.config.ts"
+    "format:check": "prettier --check src tests vite.config.ts",
+    "format": "prettier --write src tests vite.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.92",

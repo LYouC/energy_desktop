@@ -4,10 +4,10 @@ import {
   stateSchema,
   type Command,
   type State,
-} from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { applyAgentTurn } from "../shared/agent";
-import { conversationLimit, trimConversations } from "../shared/conversations";
+} from "../domain/model";
+import { applyCommand } from "../domain/operations";
+import { applyAgentTurn } from "../agent/turn";
+import { conversationLimit, trimConversations } from "../domain/conversations";
 import { migrateWorkspaceV1 } from "./migrations";
 
 export class WorkspaceDatabase {

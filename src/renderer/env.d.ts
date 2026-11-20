@@ -2,11 +2,11 @@
 interface Window {
   desktop: {
     ping(): Promise<string>;
-    load(): Promise<import("../shared/model").State>;
+    load(): Promise<import("../domain/model").State>;
     execute(
       revision: number,
-      command: import("../shared/model").Command,
-    ): Promise<import("../shared/model").State>;
+      command: import("../domain/model").Command,
+    ): Promise<import("../domain/model").State>;
     agentConfig(): Promise<{ baseURL: string; model: string; hasKey: boolean }>;
     configureAgent(input: {
       baseURL: string;
@@ -18,7 +18,7 @@ interface Window {
       sessionId: string;
       text: string;
       focusedId: string | null;
-    }): Promise<import("../shared/model").State>;
+    }): Promise<import("../domain/model").State>;
     cancelAgent(runId: string): Promise<void>;
     onAgentEvent(
       callback: (event: {

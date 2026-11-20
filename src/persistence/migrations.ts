@@ -1,4 +1,4 @@
-import { stateSchema, type State } from "../shared/model";
+import { stateSchema, type State } from "../domain/model";
 
 /** v1 的分散文本合入说明；推进日期不是开始日期，不能据此推断。 */
 export function migrateWorkspaceV1(payload: string): State {

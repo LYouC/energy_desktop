@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
-import { AgentRuntime, generateAgentTurn } from "../electron/agent/runtime";
-import { WorkspaceDatabase } from "../electron/storage";
-import { emptyState } from "../shared/model";
-import { applyAgentTurn } from "../shared/agent";
+import { AgentRuntime, generateAgentTurn } from "../src/agent/runtime";
+import { WorkspaceDatabase } from "../src/persistence/storage";
+import { emptyState } from "../src/domain/model";
+import { applyAgentTurn } from "../src/agent/turn";
 
 function response(
   calls: { name: string; input: unknown }[],

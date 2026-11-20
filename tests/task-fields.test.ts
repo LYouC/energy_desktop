@@ -4,9 +4,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { emptyState, newTask } from "../shared/model";
-import { applyCommand } from "../shared/operations";
-import { WorkspaceDatabase } from "../electron/storage";
+import { emptyState, newTask } from "../src/domain/model";
+import { applyCommand } from "../src/domain/operations";
+import { WorkspaceDatabase } from "../src/persistence/storage";
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {
   let state = applyCommand(emptyState(), {

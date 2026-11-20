@@ -5,7 +5,7 @@ import { useWorkspace } from "@/stores/workspace";
 import {
   conversationHistory,
   conversationLimit,
-} from "../../shared/conversations";
+} from "../../domain/conversations";
 import Button from "./ui/button/Button.vue";
 import Modal from "./Modal.vue";
 

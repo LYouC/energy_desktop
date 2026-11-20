@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { calculateCapacity } from "../shared/capacity";
+import { calculateCapacity } from "../src/agent/capacity";
 test("三小时不能装六小时，但两小时演示可完整保留且缓冲计入容量", () => {
   const result = calculateCapacity({
     availableMinutes: 180,

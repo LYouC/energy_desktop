@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import type { Task } from "../../shared/model";
+import type { Task } from "../../domain/model";
 
 export function deletionOrder(selectedIds: string[], tasks: Task[]) {
   const byId = new Map(tasks.map((task) => [task.id, task]));

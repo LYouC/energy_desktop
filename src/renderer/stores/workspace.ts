@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { emptyState, type Command, type State } from "../../shared/model";
+import { emptyState, type Command, type State } from "../../domain/model";
 
 export const useWorkspace = defineStore("workspace", () => {
   const state = ref<State>(emptyState());

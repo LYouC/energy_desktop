@@ -1,4 +1,4 @@
-import { localDate, type State } from "./model";
+import { localDate, type State } from "../domain/model";
 
 export function buildContext(
   state: State,

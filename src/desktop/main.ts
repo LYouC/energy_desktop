@@ -1,11 +1,11 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { WorkspaceDatabase } from "./storage";
-import { commandSchema } from "../shared/model";
-import { AgentConfig } from "./agent/config";
-import { AgentRuntime } from "./agent/runtime";
+import { WorkspaceDatabase } from "../persistence/storage";
+import { commandSchema } from "../domain/model";
+import { AgentConfig } from "../agent/config";
+import { AgentRuntime } from "../agent/runtime";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 let database: WorkspaceDatabase | undefined;
@@ -50,7 +50,7 @@ app.whenReady().then(() => {
       process.loadEnvFile(path.join(app.getAppPath(), ".env.agent.local"));
     } catch {}
   }
-  const agentConfig = new AgentConfig(app.getPath("userData"));
+  const agentConfig = new AgentConfig(app.getPath("userData"), safeStorage);
   const runtime = new AgentRuntime(
     {
       load: () => getDatabase().load(),

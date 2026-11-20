@@ -9,18 +9,19 @@
 
 ## 模块划分与定位
 
-- 开发时必须按职责划分模块，明确各自负责的行为和对外接口。模块落地后，在本文件维护一份简短索引，记录模块职责、代码入口和说明位置。新增重要模块时，用短 README 记录接口、边界和验证方式。
+- 自有应用源码统一放在 `src/`，按职责划分模块。第三方依赖由包管理器安装，开发配置、测试与夹具、设计稿和项目文档位于源码目录外。
+- 每个模块在目录内维护 README，记录内部文件、对外接口、依赖边界和验证方式。移动文件或调整职责时，同步维护模块 README、下方索引以及受影响的构建和测试入口。
 - 接手需求或修复时，优先通过模块索引定位相关模块，再查看该模块的入口和说明，开展开发。涉及跨模块行为或归属不清时，再沿调用关系扩大查找范围。
 
 ## 已落地模块索引
 
-| 模块 | 职责 | 入口与说明 |
+| 目录 | 职责和查找入口 | 模块内文档 |
 | --- | --- | --- |
-| 业务模型与操作 | 任务、阶段安排、方案接受、关系校验、能量与会话操作 | `shared/model.ts`、`shared/operations.ts`；`shared/README.md` |
-| 桌面与本地保存 | 隔离 IPC、SQLite 事务、v1→v2 任务字段迁移及版本检查 | `electron/main.ts`、`electron/storage.ts`、`electron/migrations.ts`；`electron/README.md` |
-| 工作台 | 三栏、任务详情、今日安排、双主题与界面状态 | `src/App.vue`、`src/stores/workspace.ts`；`src/README.md` |
-| 对话与历史 | 回复、会话草稿、分页管理、上下文预览 | `src/components/ChatPanel.vue`、`src/components/ChatHistory.vue`、`shared/conversations.ts`；`src/features/README.md` |
-| Agent 运行与模型配置 | AI SDK 单循环、语义决策、历史查询与会话记忆、工具回执与整轮提交、系统保护凭据 | `electron/agent/runtime.ts`、`electron/agent/config.ts`、`electron/agent/prompt.ts`、`shared/agent.ts`、`shared/context.ts`、`src/components/ModelSettings.vue`；`electron/agent/README.md` |
+| `src/renderer/` | Vue 工作台、双主题、任务编辑、今日安排、对话和模型设置。入口为 `index.html` 和 `main.ts`。 | [工作台界面](src/renderer/README.md) |
+| `src/desktop/` | Electron 窗口、进程生命周期、IPC 和依赖装配。入口为 `main.ts` 和 `preload.ts`。 | [桌面宿主](src/desktop/README.md) |
+| `src/agent/` | AI SDK 工具循环、提示词、模型配置、上下文、容量计算和整轮动作应用。入口为 `runtime.ts` 和 `turn.ts`。 | [Agent](src/agent/README.md) |
+| `src/domain/` | 任务、安排、方案、会话、能量和偏好的结构与操作规则。入口为 `model.ts` 和 `operations.ts`。 | [业务模型与操作](src/domain/README.md) |
+| `src/persistence/` | SQLite 事务、并发版本、工作区保存与 v1→v2 迁移。入口为 `storage.ts`。 | [SQLite 持久化](src/persistence/README.md) |
 
 ## 约束
 

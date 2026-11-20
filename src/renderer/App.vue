@@ -28,7 +28,7 @@ import {
   energyLabels,
   statusLabels,
   type Task,
-} from "../shared/model";
+} from "../domain/model";
 const store = useWorkspace();
 const view = ref<"today" | "all" | "completed">("today");
 const labels = { today: "今日安排", all: "所有任务", completed: "已完成" };

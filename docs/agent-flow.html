@@ -30,12 +30,12 @@
       <section class="example" aria-label="用户输入示例"><small id="scenario-label"></small><p id="example"></p></section>
       <div class="layout">
         <ol class="flow" aria-label="执行顺序">
-          <li class="node" data-step="0"><div class="step-meta"><span class="number">1</span><span class="step-state"></span></div><h3>用户发起对话</h3><p>捕获当前会话与输入，通过受控 IPC 发起一次运行。</p><code>src/components/ChatPanel.vue</code></li>
-          <li class="node" data-step="1"><div class="step-meta"><span class="number">2</span><span class="step-state"></span></div><h3>读取最新上下文</h3><p>保存用户消息，读取任务、背景、能量、安排和待处理方案。</p><code>electron/agent/runtime.ts<br />shared/context.ts</code></li>
-          <li class="node" data-step="2"><div class="step-meta"><span class="number">3</span><span class="step-state"></span></div><h3>模型判断与工具循环</h3><p>AI SDK Core 组织一次工具循环，按需查询并提交本轮完整结果。</p><code>electron/agent/runtime.ts</code></li>
-          <li class="node" data-step="3"><div class="step-meta"><span class="number">4</span><span class="step-state"></span></div><h3>校验变更与授权</h3><p>校验结构、引用、授权证据与范围，将建议转成待接受方案。</p><code>shared/agent.ts<br />shared/operations.ts</code></li>
-          <li class="node" data-step="4"><div class="step-meta"><span class="number">5</span><span class="step-state"></span></div><h3>本地事务提交</h3><p>核对版本，原子保存本轮回复、背景、正式变更或待接受方案。</p><code>electron/storage.ts</code></li>
-          <li class="node" data-step="5"><div class="step-meta"><span class="number">6</span><span class="step-state"></span></div><h3>界面展示保存结果</h3><p>刷新任务和方案，保留继续协商、逐项接受及错误恢复入口。</p><code>src/components/ChatPanel.vue</code></li>
+          <li class="node" data-step="0"><div class="step-meta"><span class="number">1</span><span class="step-state"></span></div><h3>用户发起对话</h3><p>捕获当前会话与输入，通过受控 IPC 发起一次运行。</p><code>src/renderer/components/ChatPanel.vue</code></li>
+          <li class="node" data-step="1"><div class="step-meta"><span class="number">2</span><span class="step-state"></span></div><h3>读取最新上下文</h3><p>保存用户消息，读取任务、背景、能量、安排和待处理方案。</p><code>src/agent/runtime.ts<br />src/agent/context.ts</code></li>
+          <li class="node" data-step="2"><div class="step-meta"><span class="number">3</span><span class="step-state"></span></div><h3>模型判断与工具循环</h3><p>AI SDK Core 组织一次工具循环，按需查询并提交本轮完整结果。</p><code>src/agent/runtime.ts</code></li>
+          <li class="node" data-step="3"><div class="step-meta"><span class="number">4</span><span class="step-state"></span></div><h3>校验并预演变更</h3><p>校验结构、引用与业务范围，将模型标记为待协商的动作转成方案。</p><code>src/agent/turn.ts<br />src/domain/operations.ts</code></li>
+          <li class="node" data-step="4"><div class="step-meta"><span class="number">5</span><span class="step-state"></span></div><h3>本地事务提交</h3><p>核对版本，原子保存本轮回复、背景、正式变更或待接受方案。</p><code>src/persistence/storage.ts</code></li>
+          <li class="node" data-step="5"><div class="step-meta"><span class="number">6</span><span class="step-state"></span></div><h3>界面展示保存结果</h3><p>刷新任务和方案，保留继续协商、逐项接受及错误恢复入口。</p><code>src/renderer/components/ChatPanel.vue</code></li>
         </ol>
         <section class="detail" aria-live="polite" aria-atomic="true">
           <div class="progress" id="progress"></div>
@@ -54,7 +54,7 @@
         <summary>查看编排、校验与模块职责</summary>
         <div class="technical">
           <p><code>runtime.ts</code> 使用真实对话轮次，每轮最多六个模型步骤，超时一百二十秒。<code>readTask</code> 查询任务，<code>readConversation</code> 查阅当前会话历史，<code>calculateCapacity</code> 核算时间。模型用 <code>prepareTurn</code> 提交交流或操作的语义决定、具体动作与可选记忆。程序预演并返回回执，模型随后生成自然语言终答。本轮完整结果通过一次事务保存。</p>
-          <p><code>shared/agent.ts</code> 把模型选定的动作转换成有限业务操作。任务共用名称、状态、预计开始、预计完成、说明和所属任务六项属性。模型判断哪些信息值得补充，用户跳过时继续落地。背景、硬截止和停点合入说明，预计日期与每日安排独立保存。创建时机、授权和指代由模型理解，程序检查结构、任务关系、会话归属和版本。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。语义判断通过真实场景持续评审。</p>
+          <p><code>src/agent/turn.ts</code> 把模型选定的动作转换成有限业务操作。任务共用名称、状态、预计开始、预计完成、说明和所属任务六项属性。模型判断哪些信息值得补充，用户跳过时继续落地。背景、硬截止和停点合入说明，预计日期与每日安排独立保存。创建时机、授权和指代由模型理解，程序检查结构、任务关系、会话归属和版本。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。语义判断通过真实场景持续评审。</p>
           <p><code>operations.ts</code> 维护任务关系、完成状态和方案接受规则。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量、偏好和会话记忆的快照。<code>storage.ts</code> 在事务内检查数据版本，一次保存本轮操作、记忆与最终回复。</p>
           <p><code>config.ts</code> 管理 HTTPS 服务地址、模型与凭据。设置界面输入的 Key 使用 Electron <code>safeStorage</code> 加密保存，也可从执行进程的环境变量读取。界面查询配置只取得服务地址、模型及是否已配置 Key。更换服务地址时需提供相应凭据。</p>
           <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。模型先决定操作并读取回执，随后生成的自然语言正文支持流式预览。工具步骤中的文字属于中间过程，正式业务变更与会话记录以事务保存成功为准。</p>
@@ -82,8 +82,8 @@
           steps: [
             ["捕获明确修改请求", "界面将原始输入和当前会话发送给本地执行层，用户的这句话成为本轮授权来源。", "发起一次有独立运行标识的请求。"],
             ["定位英语任务及今日安排", "服务保存消息并读取最新任务与安排。存在多个同名任务或指代不清时，模型应先核实对象。", "保存用户消息，任务仍保持当前状态。"],
-            ["解释操作与授权范围", "模型将这句话解释为英语安排从今天移到明天，提交有限操作及引用的用户原文。报告等其他任务保持各自授权边界。", "准备本轮完整变更结果。"],
-            ["检查对应任务和原文证据", "校验器核对任务引用、日期、授权证据和操作范围。自然语言授权仍依赖模型理解，场景测试会检查误解、否定表达和含糊指代。", "确认结果可进入业务操作层。"],
+            ["解释操作与授权范围", "模型判断用户已授权将英语安排从今天移到明天，提交该操作并标记为直接执行。应用将本轮用户原文记为来源。", "准备本轮完整变更结果。"],
+            ["检查任务引用与变更规则", "程序检查动作结构、任务引用和日期，并在内存中预演操作。模型依据对话判断授权范围，场景测试会检查误解、否定表达和含糊指代。", "确认结果可进入业务操作层。"],
             ["一次提交安排和回复", "业务层核对版本，在同一事务内迁移对应安排并保存回复。数据库成功返回后，运行才报告操作已生效。", "英语的今日安排移到明天，整体完成状态和真实截止保留。"],
             ["反馈具体结果", "界面刷新今日安排和任务状态，回复说明英语已经移到哪一天。用户无需再次确认已经表达清楚的同一决定。", "用户看到正式安排已更新。"]
           ]
@@ -95,7 +95,7 @@
             ["发送本轮接受范围", "用户可以通过对话表达，也可以点击方案中的接受按钮。这里演示通过对话接受当前会话的一项变更。", "发送原文接受范围。"],
             ["读取当前会话的待处理方案", "服务保存消息，读取方案标识、每项接受状态和关联任务的最新版本，明确英语和报告分别对应哪项。", "保存用户消息，读取待接受方案。"],
             ["解析只接受哪一项", "模型提交当前会话方案的对应变更标识。若存在多个可能指向，先核实；若变更依赖其他步骤，解释依赖并协商范围。", "准备有限的接受操作。"],
-            ["检查归属、范围与依赖", "校验器检查方案属于当前会话、变更仍待处理、用户接受范围对应有效条目。被拒绝或已接受的结果按业务规则处理。", "确认待执行的接受范围。"],
+            ["检查方案归属与条目状态", "程序核对方案所属会话及模型提交的条目标识。已拒绝或已接受的条目按业务规则处理。", "确认待执行的接受范围。"],
             ["应用接受部分并记录状态", "事务验证任务版本，只执行英语对应变更并更新方案状态。重复提交已经应用的接受操作不会重复创建安排。", "英语调整生效，报告继续原安排。"],
             ["展示部分接受", "方案条目显示已经接受或拒绝的结果，今日安排反映真正生效的部分。后续继续协商时使用最新数据。", "接受结果与任务变化能够相互核对。"]
           ]

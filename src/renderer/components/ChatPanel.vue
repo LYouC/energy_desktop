@@ -23,8 +23,8 @@ import Modal from "./Modal.vue";
 import ModelSettings from "./ModelSettings.vue";
 import ChatHistory from "./ChatHistory.vue";
 import { useWorkspace } from "@/stores/workspace";
-import { buildContext } from "../../shared/context";
-import { statusLabels, type Change, type Proposal } from "../../shared/model";
+import { buildContext } from "../../agent/context";
+import { statusLabels, type Change, type Proposal } from "../../domain/model";
 const props = defineProps<{ focusedId: string | null; collapsed: boolean }>();
 const emit = defineEmits<{
   "update:collapsed": [value: boolean];
