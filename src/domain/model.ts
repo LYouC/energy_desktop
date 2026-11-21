@@ -13,6 +13,16 @@ export const statusLabels = {
   done: "整体完成",
   abandoned: "主动放弃",
 } as const;
+const taskImportance = z.enum(["high", "medium", "low"]);
+const taskImportanceSchema = taskImportance.nullable();
+export const importanceLabels: Record<
+  z.infer<typeof taskImportance>,
+  string
+> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
 export const taskSchema = z.object({
   id: z.string(),
   version: z.number().int(),
@@ -29,16 +39,18 @@ export const taskSchema = z.object({
     .string()
     .describe("该任务自身的预计完成日期，YYYY-MM-DD，未知用空字符串。"),
   status: z.enum(["todo", "doing", "waiting", "done", "abandoned"]),
+  importance: taskImportanceSchema.default(null),
   parentId: z.string().nullable(),
   updatedAt: z.string(),
 });
 export type Task = z.infer<typeof taskSchema>;
-// Agent 只允许修改这些业务字段，ID、版本和更新时间由应用维护。
+// Agent 只允许修改这些字段，重要性由用户在任务编辑器设置。
 export const taskPatchSchema = taskSchema
   .omit({
     id: true,
     version: true,
     updatedAt: true,
+    importance: true,
   })
   .partial();
 // 拆分只固定所属父任务，其余属性与普通任务一致，简单子任务仅需名称。
@@ -139,7 +151,7 @@ export type State = z.infer<typeof stateSchema>;
 export const commandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("saveTask"),
-    task: taskSchema,
+    task: taskSchema.extend({ importance: taskImportanceSchema.optional() }),
     arrangement: z
       .object({ date: z.string(), scope: z.string().trim().min(1) })
       .optional(),
@@ -214,6 +226,7 @@ export function newTask(parentId: string | null = null): Task {
     startDate: "",
     expectedDate: "",
     status: "todo",
+    importance: null,
     parentId,
     updatedAt: new Date().toISOString(),
   };

@@ -7,6 +7,7 @@ import {
   newTask,
   localDate,
   statusLabels,
+  importanceLabels,
   type Task,
 } from "../../domain/model";
 const props = defineProps<{ task: Task }>();
@@ -90,17 +91,31 @@ async function remove() {
           autofocus
           placeholder="想推进什么？"
       /></label>
-      <label
-        >任务状态<select v-model="draft.status">
-          <option
-            v-for="(label, value) in statusLabels"
-            :key="value"
-            :value="value"
-          >
-            {{ label }}
-          </option>
-        </select></label
-      >
+      <div class="form-grid">
+        <label>
+          任务状态<select v-model="draft.status">
+            <option
+              v-for="(label, value) in statusLabels"
+              :key="value"
+              :value="value"
+            >
+              {{ label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          重要性<select v-model="draft.importance">
+            <option :value="null">未设置</option>
+            <option
+              v-for="(label, value) in importanceLabels"
+              :key="value"
+              :value="value"
+            >
+              {{ label }}
+            </option>
+          </select>
+        </label>
+      </div>
       <div class="form-grid">
         <label
           >预计开始日期<input v-model="draft.startDate" type="date"

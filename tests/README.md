@@ -1,5 +1,11 @@
 # 原型阶段验证
 
+## 2026-11-21 任务重要性
+
+`tests/task-fields.test.ts` 验证旧数据库兼容、保存时区分省略与清空、重开保留标注，以及 Agent 读取标注和写入限制。`tests/task-fields.desktop.mjs` 覆盖任务详情编辑、列表标注、筛选与搜索联用，以及切换筛选时的管理选择。
+
+已通过 97 项离线测试、格式检查、类型检查、生产构建和五组 Electron 桌面回归。Agent 对标注的读取和写入限制通过离线验证，本轮未调用真实模型服务。
+
 ## 2026-11-21 第一阶段 Windows 安装包
 
 隔离工作树中通过格式检查、95 项离线回归、类型检查、生产构建及五组 Electron 桌面回归。Windows 11 x64 本地生成 `xixu-0.1.0-windows-x64-setup.exe`，并用 `node tests/pack.smoke.mjs` 验证打包应用启动、Agent IPC、SQLite 和模型设置。安装向导和 GitHub 标签触发后的托管运行待验证。

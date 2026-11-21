@@ -611,6 +611,13 @@ nav button span {
   color: var(--ink);
   font-size: 12px;
 }
+.importance-filter {
+  min-height: 35px;
+  padding-block: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
 .manage-bar {
   display: flex;
   flex-wrap: wrap;
@@ -740,6 +747,19 @@ nav button span {
   flex: 1;
   overflow-wrap: anywhere;
 }
+.task-importance {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--energy);
+  color: var(--text);
+  font-size: 11px;
+}
+.task-importance-high {
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 600;
+}
 .list-task-name small,
 .task-list-row > small {
   color: var(--muted);
@@ -748,6 +768,7 @@ nav button span {
 .list-dot {
   width: 15px;
   height: 15px;
+  flex-shrink: 0;
   border: 1px solid var(--control);
   border-radius: 4px;
 }

@@ -7,6 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import { emptyState, newTask } from "../src/domain/model";
 import { applyCommand } from "../src/domain/operations";
 import { WorkspaceDatabase } from "../src/persistence/storage";
+import { buildContext } from "../src/agent/context";
+import { agentTurnSchema, applyAgentTurn } from "../src/agent/turn";
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {
   let state = applyCommand(emptyState(), {
@@ -31,10 +33,104 @@ test("普通任务与子任务共用最小字段，名称以外可以留空", ()
       "startDate",
       "expectedDate",
       "status",
+      "importance",
       "parentId",
       "updatedAt",
     ].sort(),
   );
+});
+
+test("旧版任务和保存命令兼容用户标注，重开保留标注且允许清空", () => {
+  const filename = path.join(
+    mkdtempSync(path.join(tmpdir(), "xixu-importance-")),
+    "workspace.db",
+  );
+  const { importance, ...task } = { ...newTask(), title: "旧任务", version: 1 };
+  const previous = { ...emptyState(), tasks: [task] };
+  const raw = new DatabaseSync(filename);
+  raw.exec(
+    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=2;",
+  );
+  raw
+    .prepare("INSERT INTO workspace VALUES(1, ?, ?)")
+    .run(previous.revision, JSON.stringify(previous));
+  raw.close();
+
+  const db = new WorkspaceDatabase(filename);
+  const original = db.load();
+  assert.equal(original.tasks[0].importance, null);
+  const marked = db.execute(original.revision, {
+    type: "saveTask",
+    task: { ...original.tasks[0], importance: "high" },
+  });
+  assert.equal(marked.tasks[0].importance, "high");
+  db.close();
+
+  const reopened = new WorkspaceDatabase(filename);
+  const saved = reopened.load();
+  assert.equal(saved.tasks[0].importance, "high");
+  const updated = reopened.execute(saved.revision, {
+    type: "saveTask",
+    task: { ...task, version: saved.tasks[0].version, title: "修改旧任务" },
+  });
+  assert.equal(updated.tasks[0].importance, "high");
+  const cleared = reopened.execute(updated.revision, {
+    type: "saveTask",
+    task: { ...updated.tasks[0], importance },
+  });
+  assert.equal(cleared.tasks[0].importance, null);
+  reopened.close();
+});
+
+test("Agent 从上下文读取用户标注，工具写入和草稿不能更改重要性", () => {
+  const marked = applyCommand(emptyState(), {
+    type: "saveTask",
+    task: { ...newTask(), title: "报告", importance: "high" },
+  });
+  const taskId = marked.tasks[0].id;
+  const sessionId = marked.activeSessionId;
+  assert.equal(
+    buildContext(marked, sessionId).unfinishedTasks[0].importance,
+    "high",
+  );
+  const action = {
+    type: "updateTask",
+    mode: "direct",
+    taskId,
+    patch: { title: "进展报告" },
+  };
+  const updated = applyAgentTurn(marked, sessionId, "把报告改名为进展报告", {
+    text: "已更名",
+    actions: [action],
+  });
+  assert.equal(updated.tasks[0].title, "进展报告");
+  assert.equal(updated.tasks[0].importance, "high");
+
+  for (const input of [
+    { actions: [{ ...action, patch: { importance: "low" } }] },
+    {
+      actions: [
+        {
+          type: "split",
+          mode: "proposal",
+          taskId,
+          children: [{ title: "初稿", importance: "low" }],
+        },
+      ],
+    },
+    {
+      actions: [],
+      memory: {
+        summary: "",
+        taskDraft: { title: "周报", patch: { importance: "low" } },
+      },
+    },
+  ]) {
+    assert.equal(
+      agentTurnSchema.safeParse({ text: "变更", ...input }).success,
+      false,
+    );
+  }
 });
 
 test("安排、取消与阶段完成不改预计起止日期", () => {
@@ -166,6 +262,7 @@ test("v1 数据库迁移保留任务、安排和会话，旧文本合入说明�
   const db = new WorkspaceDatabase(filename);
   const migrated = db.load();
   assert.equal(migrated.tasks[0].startDate, "");
+  assert.equal(migrated.tasks[0].importance, null);
   assert.equal(migrated.tasks[0].expectedDate, "2026-11-19");
   assert.match(migrated.tasks[0].description, /交付初稿/);
   assert.match(migrated.tasks[0].description, /背景（推测）：可能缺材料/);

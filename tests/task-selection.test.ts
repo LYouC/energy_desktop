@@ -12,6 +12,7 @@ function task(id: string, parentId: string | null = null): Task {
     startDate: "",
     expectedDate: "",
     status: "todo",
+    importance: null,
     parentId,
     updatedAt: "2026-11-19T00:00:00.000Z",
   };

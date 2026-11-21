@@ -29,6 +29,7 @@ export function migrateWorkspaceV1(payload: string): State {
     }
     return {
       ...task,
+      importance: null,
       description: notes.filter(Boolean).join("\n\n"),
       startDate: text("startDate"),
     };

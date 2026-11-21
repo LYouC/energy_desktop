@@ -40,7 +40,7 @@ SiliconFlow 继续使用已验证的 `enable_thinking:false` 工具调用配置�
 
 `turn.ts` 定义这些动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。新增计划建议保存为待接受方案，已授权操作直接执行。
 
-任务与子任务使用 `title/status/startDate/expectedDate/description/parentId`。创建和修改的 patch 及会话 taskDraft 使用这些字段，工具回执与草稿展示同步返回预计日期和说明。`split.children` 支持名称、说明、状态和预计日期，父任务由 split.taskId 确定。`createTask.ref` 可供同批动作的 taskId 和 patch.parentId 引用。持久化层读取旧拆分时将 goal 转入说明，模型工具对旧字段报错，供同一循环修正。
+创建和修改的 patch 及会话 taskDraft 使用 `title/status/startDate/expectedDate/description/parentId`，工具回执与草稿展示同步返回预计日期和说明。`split.children` 支持名称、说明、状态和预计日期，父任务由 split.taskId 确定。`createTask.ref` 可供同批动作的 taskId 和 patch.parentId 引用。持久化层读取旧拆分时将 goal 转入说明，模型工具对旧字段报错，供同一循环修正。上下文和 `readTask` 提供用户标注的 `importance`，供规划时参考。标注由任务编辑器写入。
 
 信息收集由通用提示词指导。优先提炼已有对话，自主概括标题和说明，按明确反馈判断状态。关键未知信息有价值时简短询问，用户跳过或信息足够时及时创建。预计起止日期独立于每日安排，明确安排通过 schedule 执行。硬截止、具体钟点、背景与停点按需写入说明，`updateTask.patch.description` 应合并仍有效的内容后提交完整文本。任务优先级可在分析时判断。
 

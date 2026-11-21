@@ -90,6 +90,10 @@ export function applyCommand(previous: State, input: Command): State {
         throw new Error("任务已更新，请重新打开详情。");
       const task = {
         ...command.task,
+        importance:
+          command.task.importance === undefined
+            ? (old?.importance ?? null)
+            : command.task.importance,
         version: (old?.version ?? 0) + 1,
         updatedAt: now,
       };

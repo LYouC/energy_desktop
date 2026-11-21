@@ -267,7 +267,7 @@ export async function generateAgentTurn(options: {
       }),
       readTask: tool({
         description:
-          "按任务ID查看名称、状态、预计起止日期、完整说明、所属任务、子任务与历史安排。更新说明前核实旧内容，合并仍有效的事实与要求。",
+          "按任务ID查看名称、状态、用户标注的重要性、预计起止日期、完整说明、所属任务、子任务与历史安排。更新说明前核实旧内容，合并仍有效的事实与要求。",
         inputSchema: z.object({ taskId: z.string() }),
         execute: async ({ taskId }) => {
           emit({ type: "status", text: "正在查看相关任务背景…" });

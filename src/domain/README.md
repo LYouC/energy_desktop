@@ -8,7 +8,9 @@
 
 界面、Agent 与持久化共用这些规则。调用方负责获取当前状态和保存操作结果。
 
-任务仅有名称 `title`、状态 `status`、预计开始 `startDate`、预计完成 `expectedDate`、说明 `description`、所属任务 `parentId` 六项用户属性，加上系统维护的 `id/version/updatedAt`。普通任务和子任务共用 `newTask(parentId?)` 与同一 schema。日期可空；业务入口校验有效日历日期及开始不晚于完成。说明承载目标、背景、进展等内容，不再保存旧独立字段。
+任务属性包括名称 `title`、状态 `status`、重要性 `importance`、预计开始 `startDate`、预计完成 `expectedDate`、说明 `description`、所属任务 `parentId`，以及系统维护的 `id/version/updatedAt`。普通任务和子任务共用 `newTask(parentId?)` 与同一 schema。日期可空，业务入口校验有效日历日期及开始不晚于完成。说明承载目标、背景和进展等内容。
+
+重要性取 `high`、`medium`、`low` 或 `null`，已有数据缺失时读取为 `null`。用户通过 `saveTask` 编辑标注，显式传入 `null` 清空标注。省略该字段的旧版命令沿用已有标注。
 
 安排独立于任务日期，安排、取消或阶段完成均不改预计起止日期。父子关系只表示包含，校验存在性与循环；不再维护结构化依赖。
 

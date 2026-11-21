@@ -27,6 +27,7 @@ import {
   newTask,
   energyLabels,
   statusLabels,
+  importanceLabels,
   type Task,
 } from "../domain/model";
 const store = useWorkspace();
@@ -64,6 +65,7 @@ const shellStyle = computed(() => {
   return style;
 });
 const search = ref("");
+const importanceFilter = ref<Task["importance"] | "all">("all");
 const {
   managing: selecting,
   count: selectedCount,
@@ -113,7 +115,11 @@ const visibleTasks = computed(() =>
     (task) =>
       (view.value === "completed"
         ? task.status === "done"
-        : task.status !== "done") && task.title.includes(search.value),
+        : task.status !== "done") &&
+      task.title.includes(search.value) &&
+      (view.value !== "all" ||
+        importanceFilter.value === "all" ||
+        task.importance === importanceFilter.value),
   ),
 );
 const arrangements = computed(() =>
@@ -490,6 +496,22 @@ async function energy(event: Event) {
                 :active="selecting"
                 @toggle="toggleManaging"
               />
+              <select
+                v-if="view === 'all'"
+                v-model="importanceFilter"
+                class="importance-filter"
+                aria-label="按重要性筛选"
+              >
+                <option value="all">重要性不限</option>
+                <option
+                  v-for="(label, value) in importanceLabels"
+                  :key="value"
+                  :value="value"
+                >
+                  重要性 · {{ label }}
+                </option>
+                <option :value="null">未设置重要性</option>
+              </select>
               <label class="search"
                 ><Search :size="15" /><input
                   v-model="search"
@@ -532,8 +554,16 @@ async function energy(event: Event) {
             ><span class="list-task-name"
               ><small v-if="task.parentId">子任务 · </small
               >{{ task.title }}</span
-            ><small v-if="task.status === 'abandoned'">主动放弃</small
-            ><small v-else>{{
+            >
+            <span
+              v-if="view === 'all' && task.importance"
+              class="task-importance"
+              :class="{ 'task-importance-high': task.importance === 'high' }"
+            >
+              重要性 · {{ importanceLabels[task.importance] }}
+            </span>
+            <small v-if="task.status === 'abandoned'">主动放弃</small>
+            <small v-else>{{
               store.state.arrangements.some(
                 (a) => a.taskId === task.id && a.date === date,
               )
@@ -548,7 +578,11 @@ async function energy(event: Event) {
             }}</small>
           </button>
           <p v-if="!visibleTasks.length" class="empty-state">
-            {{ search ? "没有匹配的任务。" : "这里还没有任务记录。" }}
+            {{
+              search || (view === "all" && importanceFilter !== "all")
+                ? "没有匹配的任务。"
+                : "这里还没有任务记录。"
+            }}
           </p>
         </template>
       </div>
