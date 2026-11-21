@@ -23,6 +23,7 @@
 - `npm run test:desktop` 构建并实际操作 Electron，运行主流程和独立审查场景，验证交互、重启恢复、系统主题、弹窗与对比度。
 - `npm run format:check` 检查源码格式。
 - `npm run pack` 构建 Windows 便携目录。
+- `npm run pack:installer` 生成 Windows 11 x64 安装包。
 
 开发分支采用 `codex/desktop-prototype`，每个可验证阶段独立提交。便携开发工具、数据库及构建产物由 `.gitignore` 排除。
 
@@ -30,7 +31,20 @@
 
 任务、会话及设置保存在 Electron userData 的 `workspace.db`。验证脚本使用隔离的临时目录，截图在 `test-results/`。设置 `XIXU_DATA_DIR` 可指定独立的数据目录。主题首屏缓存只保存主题选项。
 
-## 试用 Windows 原型
+## Windows 安装包
+
+在 Windows 上运行 `npm run pack:installer`，安装包位于 `release/xixu-<版本>-windows-x64-setup.exe`。安装包采用 NSIS，默认按当前用户安装，当前版本无代码签名。
+
+将版本标签推送到 GitHub 后，[Windows installer 工作流](.github/workflows/windows-installer.yml)会校验标签所指提交已进入 `main`，运行离线回归和 Electron 桌面测试，打包并检查应用能启动。完成后，在 GitHub Actions 对应运行记录的 **Artifacts** 中下载 `xixu-windows-x64-installer`，解压后运行安装程序。
+
+例如，发布 `package.json` 中的 `0.1.0` 时，在 `main` 的相应提交已推送后执行：
+
+```powershell
+git tag -a v0.1.0 main -m "息序 0.1.0"
+git push origin v0.1.0
+```
+
+## Windows 便携试用
 
 运行 `npm run pack` 后打开 `release/win-unpacked/息序.exe`。当前目录包已经独立启动验证，移动时需保留整个 `win-unpacked` 目录。原型使用无签名目录包。
 

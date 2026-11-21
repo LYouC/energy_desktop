@@ -1,5 +1,9 @@
 # 原型阶段验证
 
+## 2026-11-21 第一阶段 Windows 安装包
+
+隔离工作树中通过格式检查、95 项离线回归、类型检查、生产构建及五组 Electron 桌面回归。Windows 11 x64 本地生成 `xixu-0.1.0-windows-x64-setup.exe`，并用 `node tests/pack.smoke.mjs` 验证打包应用启动、Agent IPC、SQLite 和模型设置。安装向导和 GitHub 标签触发后的托管运行待验证。
+
 ## 2026-11-20 源码目录重构
 
 应用源码移入 `src/` 下五个模块。模拟回复移入 `tests/fixtures/mock-agent.ts`，只供工作区测试。评审前跑通离线测试和桌面流程。一次并行评审核对实现边界、需求与文档，随后修正 Agent 授权流程示例并补齐验证记录。
