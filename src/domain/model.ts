@@ -23,6 +23,30 @@ export const importanceLabels: Record<
   medium: "中",
   low: "低",
 };
+const recurrenceDate = z.iso.date();
+export const recurrenceRuleSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("daily") }),
+  z.object({
+    type: z.literal("weekly"),
+    weekdays: z
+      .array(z.number().int().min(0).max(6))
+      .min(1, "至少选择一个重复星期。")
+      .max(7)
+      .refine(
+        (days) => new Set(days).size === days.length,
+        "重复星期不能重复。",
+      )
+      .transform((days) => days.sort((a, b) => a - b)),
+  }),
+  z
+    .object({
+      type: z.literal("range"),
+      start: recurrenceDate,
+      end: recurrenceDate,
+    })
+    .refine(({ start, end }) => start <= end, "重复结束日期不能早于开始日期。"),
+]);
+export type RecurrenceRule = z.infer<typeof recurrenceRuleSchema>;
 export const taskSchema = z.object({
   id: z.string(),
   version: z.number().int(),
@@ -40,17 +64,36 @@ export const taskSchema = z.object({
     .describe("该任务自身的预计完成日期，YYYY-MM-DD，未知用空字符串。"),
   status: z.enum(["todo", "doing", "waiting", "done", "abandoned"]),
   importance: taskImportanceSchema.default(null),
+  recurrence: recurrenceRuleSchema.optional(),
   parentId: z.string().nullable(),
   updatedAt: z.string(),
 });
 export type Task = z.infer<typeof taskSchema>;
-// Agent 只允许修改这些字段，重要性由用户在任务编辑器设置。
+export function taskSubtreeIds(
+  tasks: readonly Task[],
+  rootIds: Iterable<string>,
+): Set<string> {
+  const ids = new Set(rootIds);
+  const children = new Map<string, string[]>();
+  for (const task of tasks) {
+    if (!task.parentId) continue;
+    const siblings = children.get(task.parentId) ?? [];
+    siblings.push(task.id);
+    children.set(task.parentId, siblings);
+  }
+  for (const id of ids) {
+    for (const child of children.get(id) ?? []) ids.add(child);
+  }
+  return ids;
+}
+// 用户在任务编辑器设置重要性和重复规则。
 export const taskPatchSchema = taskSchema
   .omit({
     id: true,
     version: true,
     updatedAt: true,
     importance: true,
+    recurrence: true,
   })
   .partial();
 // 拆分只固定所属父任务，其余属性与普通任务一致，简单子任务仅需名称。
@@ -73,6 +116,7 @@ export const arrangementSchema = z.object({
   date: z.string(),
   scope: z.string().trim().min(1),
   done: z.boolean(),
+  recurrence: z.object({ title: taskSchema.shape.title }).optional(),
 });
 export type Arrangement = z.infer<typeof arrangementSchema>;
 const changeSchema = z.object({
@@ -118,6 +162,18 @@ export const stateSchema = z.object({
   revision: z.number().int(),
   tasks: z.array(taskSchema),
   arrangements: z.array(arrangementSchema),
+  repeatCursors: z
+    .array(z.object({ taskId: z.string(), through: recurrenceDate }))
+    .optional(),
+  skippedOccurrences: z
+    .array(
+      z.object({
+        arrangement: arrangementSchema,
+        previousTaskIds: z.array(z.string()),
+        nextTaskIds: z.array(z.string()),
+      }),
+    )
+    .optional(),
   proposals: z.array(proposalSchema),
   sessions: z.array(
     z.object({
@@ -173,6 +229,22 @@ export const commandSchema = z.discriminatedUnion("type", [
     taskId: z.string(),
     date: z.string(),
     done: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("skipOccurrence"),
+    taskId: z.string(),
+    date: recurrenceDate,
+  }),
+  z.object({
+    type: z.literal("restoreOccurrence"),
+    taskId: z.string(),
+    date: recurrenceDate,
+  }),
+  z.object({
+    type: z.literal("updateOccurrenceScope"),
+    taskId: z.string(),
+    date: recurrenceDate,
+    scope: arrangementSchema.shape.scope,
   }),
   z.object({
     type: z.literal("move"),

@@ -3,17 +3,90 @@ import { ref, computed, watch } from "vue";
 import Modal from "./Modal.vue";
 import Button from "./ui/button/Button.vue";
 import { useWorkspace } from "@/stores/workspace";
+import { affectedRecurringTasks, tomorrow, weekdays } from "../lib/recurrence";
+import { nextRecurrenceDate } from "../../domain/recurrence";
 import {
   newTask,
-  localDate,
   statusLabels,
   importanceLabels,
+  recurrenceRuleSchema,
+  taskSubtreeIds,
+  type RecurrenceRule,
   type Task,
 } from "../../domain/model";
-const props = defineProps<{ task: Task }>();
-const emit = defineEmits<{ close: []; edit: [task: Task] }>();
+const props = defineProps<{ task: Task; date: string; fromToday?: boolean }>();
+const emit = defineEmits<{
+  close: [];
+  edit: [task: Task];
+  history: [id: string];
+}>();
 const store = useWorkspace();
 const draft = ref<Task>(JSON.parse(JSON.stringify(props.task)));
+const rule = props.task.recurrence;
+const repeatType = ref<RecurrenceRule["type"] | "none">(rule?.type ?? "none");
+const repeatDays = ref(rule?.type === "weekly" ? [...rule.weekdays] : []);
+const repeatStart = ref(rule?.type === "range" ? rule.start : props.date);
+const repeatEnd = ref(rule?.type === "range" ? rule.end : "");
+const recurrence = computed(() => {
+  if (repeatType.value === "none") return;
+  if (repeatType.value === "daily") return { type: "daily" } as const;
+  if (repeatType.value === "weekly")
+    return { type: "weekly", weekdays: [...repeatDays.value].sort() } as const;
+  return {
+    type: "range",
+    start: repeatStart.value,
+    end: repeatEnd.value,
+  } as const;
+});
+const ruleChanged = computed(() => {
+  const next = recurrence.value;
+  if (!rule || !next || rule.type !== next.type) return rule !== next;
+  if (rule.type === "weekly" && next.type === "weekly")
+    return (
+      rule.weekdays.length !== next.weekdays.length ||
+      rule.weekdays.some((day) => !next.weekdays.includes(day))
+    );
+  if (rule.type === "range" && next.type === "range")
+    return rule.start !== next.start || rule.end !== next.end;
+  return false;
+});
+const inactive = computed(
+  () => draft.value.status === "done" || draft.value.status === "abandoned",
+);
+const ruleError = computed(() => {
+  const next = recurrence.value;
+  if (!next) return "";
+  if (inactive.value) return "请先恢复任务状态，再设置重复。";
+  if (next.type === "weekly" && !next.weekdays.length)
+    return "请选择至少一个星期。";
+  if (next.type === "range") {
+    if (!next.start || !next.end) return "请选择重复的起止日期。";
+    if (next.start > next.end) return "结束日期不能早于开始日期。";
+    const keepsStart = rule?.type === "range" && rule.start === next.start;
+    if (!keepsStart && next.start < props.date) return "开始日期不能早于今天。";
+    if (rule && ruleChanged.value && next.end <= props.date)
+      return "新规则从明天生效，结束日期需在今天之后。";
+  }
+  return "";
+});
+const repeatPreview = computed(() => {
+  if (ruleError.value) return ruleError.value;
+  const result = recurrenceRuleSchema.safeParse(recurrence.value);
+  if (!result.success) return "";
+  const start = rule ? tomorrow(props.date) : props.date;
+  const date = nextRecurrenceDate(result.data, start);
+  if (!date) return "重复已结束。";
+  if (date === props.date) {
+    const alreadyScheduled = store.state.arrangements.some(
+      (item) => item.taskId === props.task.id && item.date === date,
+    );
+    return alreadyScheduled ? "保留今天已有的安排。" : "保存后加入今日安排。";
+  }
+  if (!rule) return `首次安排 ${date}`;
+  return ruleChanged.value
+    ? `次日起采用新规则，下一次 ${date}`
+    : `下次安排 ${date}`;
+});
 const open = computed({
   get: () => true,
   set: (value) => {
@@ -23,8 +96,18 @@ const open = computed({
 const error = ref("");
 const deleting = ref(false);
 const busy = ref(false);
-const scheduleDate = ref(localDate());
+const scheduleDate = ref(props.date);
 const scope = ref("");
+const temporaryToday = computed(
+  () =>
+    !!(props.fromToday && rule && scheduleDate.value === props.date) &&
+    store.state.arrangements.some(
+      (item) =>
+        item.taskId === props.task.id &&
+        item.date === props.date &&
+        !item.recurrence,
+    ),
+);
 watch(
   scheduleDate,
   (date) => {
@@ -41,20 +124,27 @@ const existing = computed(() =>
 const children = computed(() =>
   store.state.tasks.filter((task) => task.parentId === props.task.id),
 );
+const repeatDescendants = computed(() =>
+  affectedRecurringTasks(store.state.tasks, [props.task.id]).filter(
+    (task) => task.id !== props.task.id,
+  ),
+);
 const parentOptions = computed(() => {
-  const descendants = new Set([draft.value.id]);
-  for (let pass = 0; pass < store.state.tasks.length; pass++)
-    for (const task of store.state.tasks)
-      if (task.parentId && descendants.has(task.parentId))
-        descendants.add(task.id);
+  const descendants = taskSubtreeIds(store.state.tasks, [draft.value.id]);
   return store.state.tasks.filter((task) => !descendants.has(task.id));
 });
 async function save(arrange = false, addChild = false) {
+  if (busy.value) return;
+  if (ruleError.value) {
+    error.value = ruleError.value;
+    return;
+  }
   busy.value = true;
+  error.value = "";
   try {
     await store.dispatch({
       type: "saveTask",
-      task: draft.value,
+      task: { ...draft.value, recurrence: recurrence.value },
       arrangement: arrange
         ? { date: scheduleDate.value, scope: scope.value }
         : undefined,
@@ -68,11 +158,16 @@ async function save(arrange = false, addChild = false) {
   }
 }
 async function remove() {
+  if (busy.value) return;
+  busy.value = true;
+  error.value = "";
   try {
     await store.dispatch({ type: "deleteTask", id: props.task.id });
     emit("close");
   } catch (cause) {
     error.value = String(cause);
+  } finally {
+    busy.value = false;
   }
 }
 </script>
@@ -92,7 +187,7 @@ async function remove() {
           placeholder="想推进什么？"
       /></label>
       <div class="form-grid">
-        <label>
+        <label v-if="repeatType === 'none' || inactive">
           任务状态<select v-model="draft.status">
             <option
               v-for="(label, value) in statusLabels"
@@ -116,7 +211,7 @@ async function remove() {
           </select>
         </label>
       </div>
-      <div class="form-grid">
+      <div v-if="repeatType === 'none'" class="form-grid">
         <label
           >预计开始日期<input v-model="draft.startDate" type="date"
         /></label>
@@ -124,6 +219,38 @@ async function remove() {
           >预计完成日期<input v-model="draft.expectedDate" type="date"
         /></label>
       </div>
+      <label>
+        重复<select v-model="repeatType">
+          <option v-if="!rule" value="none">不重复</option>
+          <option value="daily">每天</option>
+          <option value="weekly">每周自选星期</option>
+          <option value="range">指定起止日期</option>
+        </select>
+      </label>
+      <fieldset v-if="repeatType === 'weekly'" class="repeat-days">
+        <legend>每周哪几天</legend>
+        <label v-for="[day, name] in weekdays" :key="day">
+          <input v-model="repeatDays" type="checkbox" :value="day" />
+          {{ name }}
+        </label>
+      </fieldset>
+      <div v-else-if="repeatType === 'range'" class="form-grid">
+        <label
+          >重复开始日期<input
+            v-model="repeatStart"
+            type="date"
+            :min="!rule ? date : undefined"
+        /></label>
+        <label
+          >重复结束日期<input
+            v-model="repeatEnd"
+            type="date"
+            :min="repeatStart"
+        /></label>
+      </div>
+      <p v-if="repeatPreview" aria-live="polite" class="muted">
+        {{ repeatPreview }}
+      </p>
       <label
         >说明<textarea
           v-model="draft.description"
@@ -143,26 +270,59 @@ async function remove() {
         请确认这件事已经完成。子任务或今日阶段完成，不会自动完成父任务。
       </p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
-      <div class="form-actions">
+      <div class="form-actions repeat-form-actions">
         <Button
-          v-if="existing"
+          v-if="existing && !(fromToday && rule)"
           type="button"
           variant="ghost"
+          :disabled="busy"
           @click="deleting = !deleting"
-          >删除任务</Button
+          >{{ rule ? "删除重复任务" : "删除任务" }}</Button
+        >
+        <Button
+          v-if="rule"
+          type="button"
+          variant="ghost"
+          @click="emit('history', task.id)"
+          >查看执行记录</Button
         >
         <Button type="submit" :disabled="busy">保存任务</Button>
       </div>
       <div v-if="deleting" class="notice">
-        <p>删除「{{ draft.title }}」及其全部子任务和相关安排？</p>
-        <Button type="button" variant="destructive" @click="remove"
-          >确认删除</Button
+        <p v-if="rule">
+          删除「{{
+            task.title
+          }}」后，后续日期将停止生成安排。已经生成的重复实例（包括今天）会保留。它的子任务也会被删除。
+        </p>
+        <p v-else>删除「{{ task.title }}」及其全部子任务和相关普通安排？</p>
+        <p v-if="repeatDescendants.length">
+          以下重复子任务也将停止生成安排。已生成的实例会保留。
+        </p>
+        <ul v-if="repeatDescendants.length" class="delete-list">
+          <li v-for="descendant in repeatDescendants" :key="descendant.id">
+            {{ descendant.title }}
+          </li>
+        </ul>
+        <Button
+          type="button"
+          variant="destructive"
+          :disabled="busy"
+          @click="remove"
+          >{{ rule ? "确认删除重复任务" : "确认删除" }}</Button
         >
       </div>
-      <details class="form-section">
+      <details
+        v-if="repeatType === 'none' || temporaryToday"
+        class="form-section"
+      >
         <summary>安排一次推进</summary>
         <div class="form-grid">
-          <label>推进日期<input v-model="scheduleDate" type="date" /></label>
+          <label
+            >推进日期<input
+              v-model="scheduleDate"
+              type="date"
+              :readonly="temporaryToday"
+          /></label>
           <label
             >本次阶段目标<input
               v-model="scope"

@@ -24,7 +24,8 @@ export function buildContext(
     unfinishedTasks: active.map((task) => ({
       ...task,
       previousArrangements: state.arrangements.filter(
-        (item) => item.taskId === task.id && item.date < date,
+        (item) =>
+          item.taskId === task.id && item.date < date && !item.recurrence,
       ),
     })),
     agentMemory:

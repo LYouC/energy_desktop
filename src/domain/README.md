@@ -4,6 +4,7 @@
 | ------------------------------------ | ----------------------------------------------------------------- |
 | [model.ts](model.ts)                 | 任务、安排、方案、工作区和命令的 Zod schema、类型及初始值。       |
 | [operations.ts](operations.ts)       | `applyCommand` 校验并应用任务、安排、方案、能量、偏好与会话命令。 |
+| [recurrence.ts](recurrence.ts)       | 计算重复规则的下一次日期，结算过去和当天的实例。                  |
 | [conversations.ts](conversations.ts) | 通过最近活动时间组织可见历史，处理会话删除及保留上限。            |
 
 界面、Agent 与持久化共用这些规则。调用方负责获取当前状态和保存操作结果。
@@ -20,8 +21,12 @@ Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑�
 
 今日阶段完成只写 Arrangement，任务整体完成由用户单独设置。子任务完成不自动完成父任务。删除父任务会删除后代，界面必须明确展示此范围。
 
+重复模板在任务中保存 `recurrence`，支持每天、每周自选星期和起止日期内每天。`synchronizeRecurrence(state, date)` 按本地日期结算到当天。每个模板每日至多一条实例，同日已有安排沿用原位置、范围与完成状态。实例保存当时的名称，跨日后未完成的实例显示为错过。规则编辑从次日生效。
+
+当天的实例可以完成、调序、修改范围或移除。移除单独保存当天能撤销所需的数据，实例随即从队列和历史统计移除。删除模板会停止后续生成，已产生的实例仍可查询，今天这次仍可操作。普通任务与子任务的级联删除同样保留已产生的重复实例。Agent 的动作协议暂时只允许使用普通任务的写规则。
+
 验证使用 `npm test`。Agent 动作复用同一业务入口和方案规则。
 
 `conversations.ts` 以最近活动时间排序，最多保留 1000 个会话。工作区 schema 允许旧会话省略 `agentMemory`。Agent 动作的授权语义、工作记忆与历史查询由 [Agent 模块](../agent/README.md)说明。
 
-`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。
+`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。

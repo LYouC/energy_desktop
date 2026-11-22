@@ -36,10 +36,10 @@ export function useTaskSelection() {
   function isSelected(id: string) {
     return selected.value.has(id);
   }
-  function selectAll(tasks: Task[]) {
+  function selectAll(tasks: ReadonlyArray<Pick<Task, "id">>) {
     ids.value = [...new Set(tasks.map((task) => task.id))];
   }
-  function retain(tasks: Task[]) {
+  function retain(tasks: ReadonlyArray<Pick<Task, "id">>) {
     const visible = new Set(tasks.map((task) => task.id));
     ids.value = ids.value.filter((id) => visible.has(id));
   }
@@ -56,6 +56,5 @@ export function useTaskSelection() {
     selectAll,
     retain,
     clear,
-    deletionOrder: (tasks: Task[]) => deletionOrder(ids.value, tasks),
   };
 }

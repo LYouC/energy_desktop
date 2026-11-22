@@ -14,8 +14,10 @@ defineEmits<{ toggleAll: []; remove: [] }>();
     </button>
     <span class="manage-total">共 {{ total }} 项</span>
     <span class="manage-spacer"></span>
-    <Button variant="destructive" :disabled="!count" @click="$emit('remove')"
-      ><Trash2 :size="15" />删除选中</Button
-    >
+    <slot name="actions">
+      <Button variant="destructive" :disabled="!count" @click="$emit('remove')"
+        ><Trash2 :size="15" />删除选中</Button
+      >
+    </slot>
   </div>
 </template>

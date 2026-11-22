@@ -343,11 +343,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=3");
+  db.exec("PRAGMA user_version=4");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 3);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 4);
   inspect.close();
 });
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  localDate,
   newTask,
   taskSchema,
   taskPatchSchema,
@@ -8,6 +9,7 @@ import {
   type State,
   type Proposal,
   type Change,
+  type Command,
 } from "../domain/model";
 import { applyCommand } from "../domain/operations";
 
@@ -106,11 +108,15 @@ export function applyAgentTurn(
   userText: string,
   input: unknown,
   replyId: string = crypto.randomUUID(),
+  date = localDate(),
 ): State {
   const turn = agentTurnSchema.parse(input);
   if (!previous.sessions.some((s) => s.id === sessionId))
     throw new Error("对话不存在。");
   let state = structuredClone(previous);
+  const apply = (command: Command) => {
+    state = applyCommand(state, command, date);
+  };
   const references = new Map<string, string>();
   const taskPatch = (patch: z.infer<typeof taskPatchSchema>) => ({
     ...patch,
@@ -148,7 +154,7 @@ export function applyAgentTurn(
           throw new Error("新任务引用重复。");
         references.set(action.ref, task.id);
       }
-      state = applyCommand(state, { type: "saveTask", task });
+      apply({ type: "saveTask", task });
       createdTitles.add(task.title);
       continue;
     }
@@ -158,7 +164,7 @@ export function applyAgentTurn(
         (p) => p.id === action.proposalId && p.sessionId === sessionId,
       );
       if (!target) throw new Error("只能接受当前对话中明确的方案。");
-      state = applyCommand(state, {
+      apply({
         type: "resolve",
         proposalId: target.id,
         ids: action.ids,
@@ -190,6 +196,8 @@ export function applyAgentTurn(
       if (!target) throw new Error("替换安排的目标任务不存在。");
       task = target;
     }
+    if (sourceTask.recurrence || task.recurrence)
+      throw new Error("重复任务及其当日安排目前请在工作台手动操作。");
     // 模型选择直接落地的拆分若与现有待接受条目完全相同，复用该条目执行，
     // 让真实子任务与接受记录同步，避免另建一份已接受记录而遗留原卡片。
     if (action.type === "split" && action.mode === "direct") {
@@ -210,7 +218,7 @@ export function applyAgentTurn(
         )
         .at(-1);
       if (matching) {
-        state = applyCommand(state, {
+        apply({
           type: "resolve",
           proposalId: matching.proposalId,
           ids: [matching.changeId],
@@ -261,8 +269,8 @@ export function applyAgentTurn(
         id: crypto.randomUUID(),
         changes: [change],
       };
-      state = applyCommand(state, { type: "proposal", proposal: immediate });
-      state = applyCommand(state, {
+      apply({ type: "proposal", proposal: immediate });
+      apply({
         type: "resolve",
         proposalId: immediate.id,
         ids: [change.id],
@@ -287,7 +295,7 @@ export function applyAgentTurn(
   if (draft && createdTitles.has(draft.title.trim())) {
     session.agentMemory = { ...session.agentMemory!, taskDraft: null };
   }
-  state = applyCommand(state, {
+  apply({
     type: "reply",
     proposal: proposal.changes.length ? proposal : null,
     message: {

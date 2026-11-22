@@ -274,7 +274,11 @@ export async function generateAgentTurn(options: {
           return {
             task: state.tasks.find((t) => t.id === taskId) ?? null,
             children: state.tasks.filter((t) => t.parentId === taskId),
-            arrangements: state.arrangements.filter((a) => a.taskId === taskId),
+            arrangements: state.arrangements.filter(
+              (item) =>
+                item.taskId === taskId &&
+                (!item.recurrence || item.date === context.date),
+            ),
           };
         },
       }),

@@ -20,8 +20,8 @@
 | `src/renderer/` | Vue 工作台、双主题、任务编辑、今日安排、对话和模型设置。入口为 `index.html` 和 `main.ts`。 | [工作台界面](src/renderer/README.md) |
 | `src/desktop/` | Electron 窗口、进程生命周期、IPC 和依赖装配。入口为 `main.ts` 和 `preload.ts`。 | [桌面宿主](src/desktop/README.md) |
 | `src/agent/` | AI SDK 工具循环、提示词、模型配置、上下文、容量计算和整轮动作应用。入口为 `runtime.ts` 和 `turn.ts`。 | [Agent](src/agent/README.md) |
-| `src/domain/` | 任务、安排、方案、会话、能量和偏好的结构与操作规则。入口为 `model.ts` 和 `operations.ts`。 | [业务模型与操作](src/domain/README.md) |
-| `src/persistence/` | SQLite 事务、并发版本、工作区保存与 v1→v2 迁移。入口为 `storage.ts`。 | [SQLite 持久化](src/persistence/README.md) |
+| `src/domain/` | 任务、安排、方案、会话、能量和偏好的结构与操作规则。入口为 `model.ts` 和 `operations.ts`，重复日期结算在 `recurrence.ts`。 | [业务模型与操作](src/domain/README.md) |
+| `src/persistence/` | SQLite 事务、并发版本、工作区保存与数据迁移。入口为 `storage.ts`。 | [SQLite 持久化](src/persistence/README.md) |
 
 ## 约束
 

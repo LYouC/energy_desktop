@@ -483,6 +483,16 @@ nav button span {
   min-width: 0;
   flex: 1;
 }
+.task-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.task-title-line > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .task-name {
   font-size: 15px;
   font-weight: 550;
@@ -611,7 +621,14 @@ nav button span {
   color: var(--ink);
   font-size: 12px;
 }
-.importance-filter {
+.task-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.task-list-filter {
   min-height: 35px;
   padding-block: 5px;
   background: var(--surface);
@@ -740,11 +757,37 @@ nav button span {
   display: flex;
   gap: 12px;
   align-items: center;
-  padding: 20px 4px;
+  padding: 12px 4px;
   text-align: left;
 }
 .list-task-name {
   flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+.recurrence-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: nowrap;
+}
+.list-task-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px 10px;
+  max-width: 45%;
+  text-align: right;
   overflow-wrap: anywhere;
 }
 .task-importance {
@@ -761,7 +804,7 @@ nav button span {
   font-weight: 600;
 }
 .list-task-name small,
-.task-list-row > small {
+.list-task-details small {
   color: var(--muted);
   font-size: 11px;
 }
@@ -1056,6 +1099,66 @@ select[multiple] {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+}
+.repeat-form-actions {
+  flex-wrap: wrap;
+}
+.repeat-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.repeat-days legend {
+  color: var(--text);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.repeat-days label {
+  min-height: 28px;
+  flex-direction: row;
+  align-items: center;
+  white-space: nowrap;
+}
+.repeat-days input {
+  accent-color: var(--accent);
+}
+.notice.recurrence-undo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-block: 5px;
+}
+.recurrence-history-heading {
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+}
+.recurrence-history-summary {
+  margin: 4px 0 12px;
+}
+.recurrence-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+}
+.recurrence-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.recurrence-history-row > div {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .form-section {
   border-top: 1px solid var(--line);

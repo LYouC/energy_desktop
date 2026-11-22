@@ -7,14 +7,21 @@ export const useWorkspace = defineStore("workspace", () => {
   const ready = ref(false);
   const error = ref("");
   let queue: Promise<unknown> = Promise.resolve();
-  async function load() {
+  async function refresh() {
     try {
       state.value = await window.desktop.load();
       ready.value = true;
       error.value = "";
+      return true;
     } catch (cause) {
       error.value = String(cause);
+      return false;
     }
+  }
+  function load() {
+    const work = queue.then(refresh);
+    queue = work;
+    return work;
   }
   function dispatch(command: Command): Promise<void> {
     const submitted: Command = JSON.parse(JSON.stringify(command));

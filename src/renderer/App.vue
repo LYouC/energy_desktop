@@ -12,6 +12,7 @@ import {
   Check,
   PanelLeftClose,
   PanelLeftOpen,
+  Repeat2,
 } from "lucide-vue-next";
 import { useWorkspace } from "./stores/workspace";
 import Button from "./components/ui/button/Button.vue";
@@ -20,20 +21,32 @@ import ManageBar from "./components/ManageBar.vue";
 import ManageToggle from "./components/ManageToggle.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import TaskCard from "./components/TaskCard.vue";
+import OccurrenceEditor from "./components/OccurrenceEditor.vue";
+import RecurrenceHistory from "./components/RecurrenceHistory.vue";
 import ChatPanel from "./components/ChatPanel.vue";
-import { useTaskSelection } from "./composables/taskSelection";
+import { deletionOrder, useTaskSelection } from "./composables/taskSelection";
+import {
+  affectedRecurringTasks,
+  recurrenceLabel,
+  tomorrow,
+} from "./lib/recurrence";
+import { nextRecurrenceDate } from "../domain/recurrence";
 import {
   localDate,
   newTask,
   energyLabels,
   statusLabels,
   importanceLabels,
+  type Arrangement,
   type Task,
 } from "../domain/model";
 const store = useWorkspace();
 const view = ref<"today" | "all" | "completed">("today");
 const labels = { today: "今日安排", all: "所有任务", completed: "已完成" };
 const editor = ref<Task | null>(null);
+const editorFromToday = ref(false);
+const occurrence = ref<Arrangement | null>(null);
+const history = ref<{ taskId?: string } | null>(null);
 const settingsOpen = ref(false);
 const settingsError = ref("");
 const preferences = ref("");
@@ -66,6 +79,7 @@ const shellStyle = computed(() => {
 });
 const search = ref("");
 const importanceFilter = ref<Task["importance"] | "all">("all");
+const typeFilter = ref<"all" | "single" | "repeated">("all");
 const {
   managing: selecting,
   count: selectedCount,
@@ -76,16 +90,33 @@ const {
   selectAll: selectAllTasks,
   retain: retainSelection,
   clear: clearSelection,
-  deletionOrder,
 } = useTaskSelection();
 const deleteOpen = ref(false);
 const deleting = ref(false);
 const deleteError = ref("");
 const deleteTargets = ref<Task[]>([]);
+const affectedTemplates = computed(() =>
+  affectedRecurringTasks(
+    store.state.tasks,
+    deleteTargets.value.map((task) => task.id),
+  ),
+);
+const changingOccurrences = ref(false);
 const date = ref(localDate());
-const dateTimer = setInterval(() => {
-  date.value = localDate();
-}, 30000);
+let refreshingDate = false;
+async function refreshDate() {
+  const next = localDate();
+  if (next === date.value || refreshingDate) return;
+  refreshingDate = true;
+  try {
+    if (!(await store.load())) return;
+    date.value = next;
+    occurrence.value = null;
+  } finally {
+    refreshingDate = false;
+  }
+}
+const dateTimer = setInterval(refreshDate, 30000);
 const systemTheme = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() {
   document.documentElement.classList.toggle(
@@ -105,8 +136,12 @@ watch(
 onBeforeUnmount(() => {
   clearInterval(dateTimer);
   systemTheme.removeEventListener("change", applyTheme);
+  window.removeEventListener("focus", refreshDate);
+  document.removeEventListener("visibilitychange", refreshDate);
 });
 onMounted(async () => {
+  window.addEventListener("focus", refreshDate);
+  document.addEventListener("visibilitychange", refreshDate);
   await store.load();
   applyTheme();
 });
@@ -119,7 +154,10 @@ const visibleTasks = computed(() =>
       task.title.includes(search.value) &&
       (view.value !== "all" ||
         importanceFilter.value === "all" ||
-        task.importance === importanceFilter.value),
+        task.importance === importanceFilter.value) &&
+      (view.value !== "all" ||
+        typeFilter.value === "all" ||
+        (typeFilter.value === "repeated") === Boolean(task.recurrence)),
   ),
 );
 const arrangements = computed(() =>
@@ -127,10 +165,24 @@ const arrangements = computed(() =>
     .filter((item) => item.date === date.value)
     .flatMap((item) => {
       const task = store.state.tasks.find((task) => task.id === item.taskId);
-      return task ? [{ ...item, task }] : [];
+      return task || item.recurrence ? [{ ...item, task }] : [];
     }),
 );
 const pending = computed(() => arrangements.value.filter((item) => !item.done));
+const upcomingRepeatDays = computed(() => {
+  const current = new Set(
+    pending.value.filter((item) => item.recurrence).map((item) => item.taskId),
+  );
+  return new Map(
+    store.state.tasks.flatMap((task) => {
+      if (!task.recurrence) return [];
+      const next = current.has(task.id)
+        ? date.value
+        : nextRecurrenceDate(task.recurrence, tomorrow(date.value));
+      return [[task.id, next] as const];
+    }),
+  );
+});
 const completed = computed(() =>
   arrangements.value.filter((item) => item.done),
 );
@@ -142,19 +194,50 @@ const focused = computed(
 const remaining = computed(() =>
   pending.value.filter((item) => item.taskId !== focused.value?.taskId),
 );
-const manageableTasks = computed(() =>
+const moveNeighbors = computed(() => {
+  const queue = pending.value.some((item) => item.recurrence)
+    ? pending.value
+    : remaining.value;
+  return new Map(
+    queue.map((item, index) => [
+      item.taskId,
+      { previous: queue[index - 1]?.taskId, next: queue[index + 1]?.taskId },
+    ]),
+  );
+});
+const manageableItems = computed(() =>
   view.value === "today"
-    ? pending.value.map((item) => item.task)
+    ? pending.value.map((item) => ({ id: item.taskId }))
     : visibleTasks.value,
+);
+const pickedToday = computed(() =>
+  pending.value.filter((item) => isSelected(item.taskId)),
+);
+const pickedRepeat = computed(() =>
+  pickedToday.value.filter((item) => item.recurrence),
+);
+const pickedTemporary = computed(() =>
+  pickedToday.value.filter((item) => !item.recurrence && item.task?.recurrence),
+);
+const pickedOrdinary = computed(() =>
+  pickedToday.value.flatMap((item) =>
+    item.task && !item.recurrence && !item.task.recurrence ? [item.task] : [],
+  ),
+);
+const skippedToday = computed(
+  () =>
+    store.state.skippedOccurrences?.filter(
+      (item) => item.arrangement.date === date.value,
+    ) ?? [],
 );
 const allSelected = computed(
   () =>
-    manageableTasks.value.length > 0 &&
-    manageableTasks.value.every((task) => isSelected(task.id)),
+    manageableItems.value.length > 0 &&
+    manageableItems.value.every((item) => isSelected(item.id)),
 );
 watch(view, () => stopSelection());
-watch(manageableTasks, (tasks) => {
-  if (selecting.value) retainSelection(tasks);
+watch(manageableItems, (items) => {
+  if (selecting.value) retainSelection(items);
 });
 watch(pending, (items) => {
   if (!items.some((item) => item.taskId === focusId.value))
@@ -166,6 +249,7 @@ const historicalUnfinished = computed(
       (item) =>
         item.date < date.value &&
         !item.done &&
+        !item.recurrence &&
         store.state.tasks.some(
           (task) =>
             task.id === item.taskId &&
@@ -173,13 +257,42 @@ const historicalUnfinished = computed(
         ),
     ).length,
 );
-function edit(task: Task) {
+function openEditor(task: Task, fromToday: boolean) {
+  occurrence.value = null;
+  editorFromToday.value = fromToday;
   editor.value = JSON.parse(JSON.stringify(task));
   contextTaskId.value = task.id;
 }
+function edit(task: Task) {
+  openEditor(task, view.value === "today");
+}
+function addTask() {
+  editorFromToday.value = view.value === "today";
+  editor.value = newTask();
+}
+function openOccurrence(item: Arrangement) {
+  occurrence.value = item;
+  contextTaskId.value = store.state.tasks.some(
+    (task) => task.id === item.taskId,
+  )
+    ? item.taskId
+    : null;
+}
+function openHistory(taskId?: string) {
+  editor.value = null;
+  occurrence.value = null;
+  history.value = { taskId };
+}
+const occurrenceTask = computed(() =>
+  store.state.tasks.find((task) => task.id === occurrence.value?.taskId),
+);
 function selectFocus(taskId: string) {
   focusId.value = taskId;
   contextTaskId.value = null;
+}
+function moved(taskId: string, targetTaskId: string) {
+  if (focusId.value === taskId || focusId.value === targetTaskId)
+    focusId.value = null;
 }
 function toggleManaging() {
   if (selecting.value) stopSelection();
@@ -187,16 +300,55 @@ function toggleManaging() {
 }
 function toggleAll() {
   if (allSelected.value) clearSelection();
-  else selectAllTasks(manageableTasks.value);
+  else selectAllTasks(manageableItems.value);
 }
 function openDelete() {
-  const ids = deletionOrder(manageableTasks.value);
-  deleteTargets.value = manageableTasks.value.filter((task) =>
-    ids.includes(task.id),
+  const selected =
+    view.value === "today"
+      ? pickedOrdinary.value
+      : visibleTasks.value.filter((task) => isSelected(task.id));
+  const ids = deletionOrder(
+    selected.map((task) => task.id),
+    store.state.tasks,
   );
+  deleteTargets.value = selected.filter((task) => ids.includes(task.id));
   if (!deleteTargets.value.length) return;
   deleteError.value = "";
   deleteOpen.value = true;
+}
+async function removeTodayItems(items: Arrangement[]) {
+  if (changingOccurrences.value) return;
+  changingOccurrences.value = true;
+  try {
+    for (const item of items) {
+      await store.dispatch({
+        type: item.recurrence ? "skipOccurrence" : "unschedule",
+        taskId: item.taskId,
+        date: item.date,
+      });
+    }
+  } catch {
+    // The workspace displays errors and reloads the latest data.
+  } finally {
+    changingOccurrences.value = false;
+  }
+}
+async function restoreOccurrences() {
+  if (changingOccurrences.value) return;
+  changingOccurrences.value = true;
+  try {
+    for (const { arrangement } of [...skippedToday.value].reverse()) {
+      await store.dispatch({
+        type: "restoreOccurrence",
+        taskId: arrangement.taskId,
+        date: arrangement.date,
+      });
+    }
+  } catch {
+    // The remaining skipped items remain available for retry.
+  } finally {
+    changingOccurrences.value = false;
+  }
 }
 async function confirmDelete() {
   if (!deleteTargets.value.length) return;
@@ -269,7 +421,7 @@ async function energy(event: Event) {
         class="new-task"
         :aria-label="sidebarCollapsed ? '记下一件事' : undefined"
         :title="sidebarCollapsed ? '记下一件事' : undefined"
-        @click="editor = newTask()"
+        @click="addTask"
         ><Plus :size="16" /><span v-if="!sidebarCollapsed"
           >记下一件事</span
         ></Button
@@ -401,13 +553,47 @@ async function energy(event: Event) {
             :total="pending.length"
             :all-selected="allSelected"
             @toggle-all="toggleAll"
-            @remove="openDelete"
-          />
+          >
+            <template #actions>
+              <Button
+                v-if="pickedRepeat.length"
+                variant="outline"
+                :disabled="changingOccurrences"
+                @click="removeTodayItems(pickedRepeat)"
+                >从今天移除 {{ pickedRepeat.length }} 项重复安排</Button
+              >
+              <Button
+                v-if="pickedTemporary.length"
+                variant="outline"
+                :disabled="changingOccurrences"
+                @click="removeTodayItems(pickedTemporary)"
+                >移出 {{ pickedTemporary.length }} 项临时安排</Button
+              >
+              <Button
+                v-if="pickedOrdinary.length"
+                variant="destructive"
+                :disabled="changingOccurrences"
+                @click="openDelete"
+                >删除 {{ pickedOrdinary.length }} 项普通任务</Button
+              >
+            </template>
+          </ManageBar>
+          <div v-if="skippedToday.length" class="notice recurrence-undo">
+            <span role="status"
+              >已从今天移除 {{ skippedToday.length }} 项重复安排</span
+            >
+            <Button
+              variant="ghost"
+              :disabled="changingOccurrences"
+              @click="restoreOccurrences"
+              >{{ skippedToday.length === 1 ? "撤销" : "撤销全部" }}</Button
+            >
+          </div>
           <div v-if="!arrangements.length" class="empty-state">
             <Sun :size="28" />
             <h2>给今天一个开始</h2>
             <p>记下一件事，设定本次推进范围。也可以在右侧试着生成安排。</p>
-            <Button variant="outline" @click="editor = newTask()"
+            <Button variant="outline" @click="addTask"
               ><Plus :size="16" />记下一件事</Button
             >
           </div>
@@ -416,11 +602,16 @@ async function energy(event: Event) {
               v-if="focused"
               :task="focused.task"
               :arrangement="focused"
+              :previous-task-id="moveNeighbors.get(focused.taskId)?.previous"
+              :next-task-id="moveNeighbors.get(focused.taskId)?.next"
               focus
               :selectable="selecting"
-              :selected="isSelected(focused.task.id)"
+              :selected="isSelected(focused.taskId)"
               @select="toggleSelection"
               @edit="edit"
+              @occurrence="openOccurrence"
+              @skip="removeTodayItems([$event])"
+              @moved="moved"
             />
             <p v-else class="today-finished" role="status">
               <CircleCheck :size="18" /> 今日安排已全部完成
@@ -436,17 +627,20 @@ async function energy(event: Event) {
                 >
               </div>
               <TaskCard
-                v-for="(item, index) in remaining"
+                v-for="item in remaining"
                 :key="item.taskId"
                 :task="item.task"
                 :arrangement="item"
-                :previous-task-id="remaining[index - 1]?.taskId"
-                :next-task-id="remaining[index + 1]?.taskId"
+                :previous-task-id="moveNeighbors.get(item.taskId)?.previous"
+                :next-task-id="moveNeighbors.get(item.taskId)?.next"
                 :selectable="selecting"
-                :selected="isSelected(item.task.id)"
+                :selected="isSelected(item.taskId)"
                 @select="toggleSelection"
                 @edit="edit"
+                @occurrence="openOccurrence"
+                @skip="removeTodayItems([$event])"
                 @focus-task="selectFocus"
+                @moved="moved"
               />
             </section>
             <details
@@ -462,6 +656,7 @@ async function energy(event: Event) {
                 :task="item.task"
                 :arrangement="item"
                 @edit="edit"
+                @occurrence="openOccurrence"
               />
             </details>
           </div>
@@ -486,9 +681,15 @@ async function energy(event: Event) {
             </div>
             <div class="page-actions">
               <Button
+                v-if="view === 'all'"
+                variant="ghost"
+                @click="openHistory()"
+                >重复记录</Button
+              >
+              <Button
                 v-if="view === 'all' && !selecting"
                 variant="outline"
-                @click="editor = newTask()"
+                @click="addTask"
                 ><Plus :size="15" />添加任务</Button
               >
               <ManageToggle
@@ -496,30 +697,42 @@ async function energy(event: Event) {
                 :active="selecting"
                 @toggle="toggleManaging"
               />
-              <select
-                v-if="view === 'all'"
-                v-model="importanceFilter"
-                class="importance-filter"
-                aria-label="按重要性筛选"
-              >
-                <option value="all">重要性不限</option>
-                <option
-                  v-for="(label, value) in importanceLabels"
-                  :key="value"
-                  :value="value"
-                >
-                  重要性 · {{ label }}
-                </option>
-                <option :value="null">未设置重要性</option>
-              </select>
-              <label class="search"
-                ><Search :size="15" /><input
-                  v-model="search"
-                  placeholder="搜索任务"
-                  aria-label="搜索任务"
-              /></label>
             </div>
           </header>
+          <div class="task-list-filters">
+            <select
+              v-if="view === 'all'"
+              v-model="typeFilter"
+              class="task-list-filter"
+              aria-label="按任务类型筛选"
+            >
+              <option value="all">全部类型</option>
+              <option value="single">一次性</option>
+              <option value="repeated">重复</option>
+            </select>
+            <select
+              v-if="view === 'all'"
+              v-model="importanceFilter"
+              class="importance-filter task-list-filter"
+              aria-label="按重要性筛选"
+            >
+              <option value="all">重要性不限</option>
+              <option
+                v-for="(label, value) in importanceLabels"
+                :key="value"
+                :value="value"
+              >
+                重要性 · {{ label }}
+              </option>
+              <option :value="null">未设置重要性</option>
+            </select>
+            <label class="search"
+              ><Search :size="15" /><input
+                v-model="search"
+                placeholder="搜索任务"
+                aria-label="搜索任务"
+            /></label>
+          </div>
           <ManageBar
             v-if="selecting"
             :count="selectedCount"
@@ -550,36 +763,59 @@ async function energy(event: Event) {
             <CircleCheck v-else-if="task.status === 'done'" :size="17" /><span
               v-else
               class="list-dot"
-            ></span
-            ><span class="list-task-name"
-              ><small v-if="task.parentId">子任务 · </small
-              >{{ task.title }}</span
-            >
-            <span
-              v-if="view === 'all' && task.importance"
-              class="task-importance"
-              :class="{ 'task-importance-high': task.importance === 'high' }"
-            >
-              重要性 · {{ importanceLabels[task.importance] }}
+            ></span>
+            <span class="list-task-name">
+              <span class="task-title-line">
+                <span
+                  ><small v-if="task.parentId">子任务 · </small
+                  >{{ task.title }}</span
+                >
+                <span v-if="task.recurrence" class="recurrence-tag">
+                  <Repeat2 :size="12" aria-hidden="true" />重复
+                </span>
+              </span>
+              <small v-if="task.recurrence" class="list-repeat-rule">{{
+                recurrenceLabel(task.recurrence)
+              }}</small>
             </span>
-            <small v-if="task.status === 'abandoned'">主动放弃</small>
-            <small v-else>{{
-              store.state.arrangements.some(
-                (a) => a.taskId === task.id && a.date === date,
-              )
-                ? "今日"
-                : task.startDate && task.expectedDate
-                  ? `${task.startDate} → ${task.expectedDate}`
-                  : task.startDate
-                    ? `预计开始 ${task.startDate}`
-                    : task.expectedDate
-                      ? `预计完成 ${task.expectedDate}`
-                      : statusLabels[task.status]
-            }}</small>
+            <span class="list-task-details">
+              <span
+                v-if="view === 'all' && task.importance"
+                class="task-importance"
+                :class="{ 'task-importance-high': task.importance === 'high' }"
+              >
+                重要性 · {{ importanceLabels[task.importance] }}
+              </span>
+              <small v-if="task.recurrence">
+                {{
+                  upcomingRepeatDays.get(task.id) === date
+                    ? "今日"
+                    : upcomingRepeatDays.get(task.id)
+                      ? `下次 ${upcomingRepeatDays.get(task.id)}`
+                      : "重复已结束"
+                }}
+              </small>
+              <small v-else-if="task.status === 'abandoned'">主动放弃</small>
+              <small v-else>{{
+                store.state.arrangements.some(
+                  (a) => a.taskId === task.id && a.date === date,
+                )
+                  ? "今日"
+                  : task.startDate && task.expectedDate
+                    ? `${task.startDate} → ${task.expectedDate}`
+                    : task.startDate
+                      ? `预计开始 ${task.startDate}`
+                      : task.expectedDate
+                        ? `预计完成 ${task.expectedDate}`
+                        : statusLabels[task.status]
+              }}</small>
+            </span>
           </button>
           <p v-if="!visibleTasks.length" class="empty-state">
             {{
-              search || (view === "all" && importanceFilter !== "all")
+              search ||
+              (view === "all" &&
+                (importanceFilter !== "all" || typeFilter !== "all"))
                 ? "没有匹配的任务。"
                 : "这里还没有任务记录。"
             }}
@@ -589,13 +825,17 @@ async function energy(event: Event) {
     </main>
     <ChatPanel
       v-model:collapsed="chatCollapsed"
-      :focused-id="contextTaskId ?? focused?.taskId ?? null"
+      :focused-id="contextTaskId ?? focused?.task?.id ?? null"
       @resize="chatWidth = $event"
     />
     <Modal
       v-model:open="deleteOpen"
-      title="删除任务"
-      description="任务及其子任务、相关安排会一并删除，且无法恢复。"
+      :title="
+        deleteTargets.length === 1 && deleteTargets[0].recurrence
+          ? '删除重复任务'
+          : '删除任务'
+      "
+      description="任务、全部子任务及各日期的普通安排将被删除，且无法恢复。"
       ><div class="delete-summary">
         <p class="manage-count">
           将删除以下 <strong>{{ deleteTargets.length }}</strong> 项任务
@@ -608,6 +848,14 @@ async function energy(event: Event) {
         <p v-if="deleteTargets.length > 5" class="muted">
           以及另外 {{ deleteTargets.length - 5 }} 项
         </p>
+        <div v-if="affectedTemplates.length" class="notice">
+          <p>以下重复任务将停止生成安排。已经生成的实例（包括今天）会保留。</p>
+          <ul class="delete-list">
+            <li v-for="task in affectedTemplates" :key="task.id">
+              {{ task.title }}
+            </li>
+          </ul>
+        </div>
       </div>
       <p v-if="deleteError" role="alert" class="error">{{ deleteError }}</p>
       <div class="form-actions confirm-actions">
@@ -626,8 +874,25 @@ async function energy(event: Event) {
       v-if="editor"
       :key="editor.id"
       :task="editor"
+      :date="date"
+      :from-today="editorFromToday"
       @edit="edit"
+      @history="openHistory"
       @close="editor = null"
+    />
+    <OccurrenceEditor
+      v-if="occurrence"
+      :occurrence="occurrence"
+      :task="occurrenceTask"
+      @close="occurrence = null"
+      @settings="openEditor($event, true)"
+      @history="openHistory"
+    />
+    <RecurrenceHistory
+      v-if="history"
+      :date="date"
+      :task-id="history.taskId"
+      @close="history = null"
     />
     <Modal
       v-model:open="settingsOpen"
