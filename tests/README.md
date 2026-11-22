@@ -31,11 +31,13 @@ Agent 重复任务扩展通过 117 项离线用例和六组 Electron 桌面回�
 ## 真实模型验证
 
 以下命令会调用真实模型并消耗 API 额度。开发实验使用本地 `.env.agent.local`，脱敏结果写入 Git 忽略的 `test-results/`。
+真实模型 Agent 用例只在 Agent 变更时按涉及的场景执行。
 
 - `npm run test:agent:live` 串行运行六条真实模型样例。
 - `npm run test:agent:journey` 运行 S01 七轮连续对话，末轮同日序列化重读后继续。
 - `npm run test:agent:behavior` 验证自然确认、草稿承接、含糊指代、事实纠正和历史查询等场景。用 `XIXU_BEHAVIOR_FILTER` 按逗号分隔的子串选择场景。
 - PowerShell 中将 `$env:XIXU_BEHAVIOR_FILTER = 'B09'` 后运行 `npm run test:agent:behavior`，选择重复任务五条场景。
+- PowerShell 中设置 `$env:XIXU_BEHAVIOR_FILTER = 'B10'` 后运行 `npm run test:agent:behavior`，核对回复中的系统本地年月日和时分以及空业务动作。
 - `node tests/agent-real.desktop.mjs` 对已构建的应用发送一轮真实桌面对话，检查 SQLite 保存和重启恢复。
 
 ## Windows 交付

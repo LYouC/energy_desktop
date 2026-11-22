@@ -258,7 +258,7 @@ export async function generateAgentTurn(options: {
     model: options.model ?? provider.chatModel(connection.model),
     system:
       agentInstructions +
-      `\n本轮实际本地日期为${calendar.today}，时区为${context.timezone}。相对日期、今天以及会话记忆中的本轮日期均据此确定。`,
+      `\n本轮读取的系统本地时间为 ${context.time}（时区 ${context.timezone}）。涉及当前钟点时直接使用此值。工作区今日日期为 ${calendar.today}，安排和相对日期使用 calendar 锚点。`,
     messages: [
       {
         role: "user",

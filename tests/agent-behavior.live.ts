@@ -454,4 +454,29 @@ await run(
     assert.equal(next.arrangements[0].done, true);
   },
 );
+const clockCheckStarted = Date.now();
+await run(
+  "B10 以系统本地时钟回答当前时间",
+  emptyState(),
+  "每天晚上 11:30 睡，早上 7:30 起。只告诉我现在的系统本地时间，用 YYYY-MM-DD HH:mm 格式，不用记录或安排。",
+  ["准确复述系统本地日期和时分，区分当前时间与作息钟点。"],
+  (_before, _next, turn) => {
+    const reported = turn.text.trim();
+    const formatter = new Intl.DateTimeFormat("sv-SE", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+    const firstMinute = Math.floor(clockCheckStarted / 60_000);
+    const lastMinute = Math.floor(Date.now() / 60_000);
+    const expected = [];
+    for (let minute = firstMinute; minute <= lastMinute; minute++) {
+      expected.push(formatter.format(minute * 60_000));
+    }
+    assert(
+      expected.includes(reported),
+      `系统本地时间应为 ${expected.join(" 或 ")}`,
+    );
+    assert.deepEqual(turn.actions, []);
+  },
+);
 save();

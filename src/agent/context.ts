@@ -1,10 +1,9 @@
 import { localDate, type State } from "../domain/model";
 
-export function buildContext(
-  state: State,
-  sessionId: string,
-  date = localDate(),
-) {
+export function buildContext(state: State, sessionId: string, date?: string) {
+  const now = new Date();
+  const today = localDate(now);
+  date ??= today;
   const active = state.tasks.filter(
     (task) => !["done", "abandoned"].includes(task.status),
   );
@@ -13,7 +12,7 @@ export function buildContext(
   );
   return {
     date,
-    time: new Date().toISOString(),
+    time: `${today} ${now.toTimeString().slice(0, 5)}`,
     energy: state.energy,
     preferences: state.preferences,
     recentResults: state.tasks

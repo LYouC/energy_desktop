@@ -152,6 +152,46 @@ const connection = {
 };
 const finalText = "已创建整理会议笔记任务，目标是方便检索决定和待办。";
 
+test("Agent 决策和终答都收到系统本地日期与时分", async (context) => {
+  context.mock.timers.enable({
+    apis: ["Date"],
+    now: new Date(2026, 10, 23, 0, 7, 42),
+  });
+  const state = emptyState();
+  const systemMessages: string[] = [];
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      const instructions = prompt.find((message) => message.role === "system");
+      systemMessages.push(instructions?.content ?? "");
+
+      return prompt.some((message) => message.role === "tool")
+        ? response([], "2026-11-23 00:07")
+        : response([
+            {
+              name: "prepareTurn",
+              input: { intent: "conversation", actions: [] },
+            },
+          ]);
+    },
+  });
+
+  const { turn } = await generateAgentTurn({
+    state,
+    sessionId: state.activeSessionId,
+    userText: "现在是几月几日几点几分？",
+    focusedId: null,
+    connection,
+    signal: new AbortController().signal,
+    emit: () => {},
+    model,
+  });
+  assert.equal(turn.text, "2026-11-23 00:07");
+  assert.equal(systemMessages.length, 2);
+  for (const message of systemMessages) {
+    assert.match(message, /2026-11-23 00:07/);
+  }
+});
+
 test("最终回复流中断会丢弃半段预览并从决策步骤重试", async (context) => {
   const db = new WorkspaceDatabase(":memory:");
   context.after(() => db.close());
