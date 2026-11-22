@@ -11,7 +11,7 @@
 
 本模块复用[领域模型与命令](../domain/README.md)。运行层接收工作区读写接口，由[桌面宿主](../desktop/README.md)接入 SQLite 和 IPC。配置从宿主接收凭据加密能力。
 
-`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、部分接受、阶段收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。95 项离线回归、五组 Electron 桌面回归、类型检查、生产构建与源码格式检查通过，真实模型表现待复验。
+`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、部分接受、阶段收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。
 
 ## 调用与数据流
 
@@ -19,15 +19,15 @@
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
 
-重复任务规则和当天实例只作为规划背景。`readTask` 读取当天的重复实例，往日执行记录留在工作台的「重复记录」中。重复模板与实例目前由用户手动操作。Agent 写入扩展见 [开发路线](../../docs/技术方案.md)。
+重复任务规则和当天实例只作为规划背景。`readTask` 读取当天的重复实例，往日执行记录留在工作台的「重复记录」中。重复模板与实例目前由用户手动操作。Agent 写入扩展见 [开发计划](../../docs/开发计划.md#agent-操作重复任务)。
 
-每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。每次生成共用一套最多六步的工具循环。运行层对可重试的服务或网络故障最多退避重试三次，共享两分钟总时限；取消立即终止等待，业务校验和鉴权失败不会自动重试。额外同模型 review 试验未识别连续流程遗漏，已撤回，其结果保留在验证记录。
+每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。每次生成共用一套最多六步的工具循环。运行层对可重试的服务或网络故障最多退避重试三次，共享两分钟总时限；取消立即终止等待，业务校验和鉴权失败不会自动重试。
 
-SiliconFlow 继续使用已验证的 `enable_thinking:false` 工具调用配置。本轮尝试服务默认推理时未得到可应用结果，尚未确认该模式的完整兼容性。参数说明见 [SiliconFlow 官方文档](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
+SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服务默认推理模式的兼容性见 [Agent 验证记录](../../docs/Agent验证记录.md)。参数说明见 [SiliconFlow 官方文档](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
 
 提交前比较任务、安排、方案、能量、偏好和会话工作记忆的快照。`WorkspaceDatabase.commitAgentTurn` 在一次事务中保存动作、方案、记忆和助手回复。成功回复使用运行标识生成持久化 ID，使重启后的同一请求能识别为已提交。
 
-成功预演后的回复步骤支持流式预览，决策前和混合工具步骤中的文字留在模型循环中。取消、超时、异常协议或模型失败会结束本轮，保留已保存的用户消息。业务变更、记忆与助手回复通过最后的 SQLite 事务统一保存，成功的请求可在重启后恢复识别。
+成功预演后的回复步骤支持流式预览，决策前和混合工具步骤中的文字留在模型循环中。提交前遇到取消、超时或生成失败时，保留已保存的用户消息。
 
 ## 工具与业务边界
 
@@ -58,6 +58,6 @@ SiliconFlow 继续使用已验证的 `enable_thinking:false` 工具调用配置�
 
 开发时本地 `.env.agent.local` 可提供 `XIXU_API_KEY`、`XIXU_BASE_URL`、`XIXU_MODEL`。文件由 Git 忽略，正式目录包通过模型设置配置。Key 使用 Electron `safeStorage` 加密后写入 userData 的 `model-config.json`。服务地址更换要求对应 Key，地址使用 HTTPS。SDK 默认错误打印已关闭，界面接收脱敏错误。
 
-`npm test` 检查领域、SQLite、运行边界及真实 SDK 工具编排，`npm run test:desktop` 检查桌面交互。`npm run test:agent:live` 和 `npm run test:agent:behavior` 串行调用实际模型，会消耗 API 额度。结果保存在忽略的 `test-results/`，行为用例支持逗号分隔的 `XIXU_BEHAVIOR_FILTER`。真实模型评估同时检查程序断言和回复质量。
+`npm test` 验证运行边界与 SDK 工具编排，`npm run test:desktop` 验证对话界面和 IPC。真实模型验证命令见 [测试说明](../../tests/README.md#真实模型验证)。
 
-完整流程可打开 [交互说明](../../docs/agent-flow.html)。
+对话流程见 [交互说明](../../docs/agent-flow.html)，模型表现与覆盖边界见 [Agent 验证记录](../../docs/Agent验证记录.md)。

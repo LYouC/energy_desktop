@@ -18,8 +18,6 @@
 
 `RecurrenceHistory.vue` 由「所有任务」上的「重复记录」或任务详情打开，按任务列出日期实例和结果。模板已删除时仍可查找记录，也可从当天实例进入。切换本地日期时重新加载工作区；错过的重复实例出现在重复记录中。
 
-字段修订已适配真实 Agent，`npm test`、类型检查与标准构建覆盖业务规则、Agent 字段与界面类型。桌面手动验证先 `node node_modules/vite/bin/vite.js build`，再 `node tests/task-fields.desktop.mjs`，该脚本不调用模型。
-
 `App.vue` 负责三栏导航、主题和视图组合，并持有侧栏折叠、对话折叠与对话宽度状态，偏好经 localStorage 持久化。`TaskEditor.vue` 编辑任务、背景、进度和安排，`TaskCard.vue` 展示当日范围与子任务。`ChatPanel.vue` 管理真实对话、流式预览、取消与方案交互，并提供对话折叠按钮与左缘拖拽条（300–560px，双击恢复默认），`ModelSettings.vue` 管理模型设置并清空用后的凭据输入。UI 基础采用 shadcn-vue 的源码组件模式，Button 组合 Reka Primitive、CVA 与 cn，弹层采用 Reka Dialog 的焦点管理。
 
 列表页与今日安排共用“管理”多选：`ManageToggle.vue` 提供统一入口，`ManageBar.vue` 展示已选数量、全选与删除入口，`composables/taskSelection.ts` 负责选择状态、可见项收敛与父子删除去重。删除前用 `Modal` 确认，确认后逐个提交 `deleteTask`；中途失败会保留剩余目标并显示原因。管理模式下任务卡切换为紧凑选择行，退出或切换视图会清空选择。该功能以 `npm test` 与 `npm run build` 验证。
@@ -30,7 +28,7 @@ Pinia 的 `workspace` 持有业务数据的界面副本，所有写入串行调�
 
 主题缓存只用于首次绘制，SQLite 保存用户正式选择。系统主题事件只在跟随系统模式改变外观。默认空工作区，验证数据使用隔离临时目录。
 
-`npm run test:desktop` 实际启动 Electron，覆盖主要交互和重启恢复。截图输出到被忽略的 `test-results/`。
+`npm run test:desktop` 实际启动 Electron，覆盖主要交互和重启恢复。已构建应用可直接运行 `node tests/task-fields.desktop.mjs` 验证任务编辑。验证范围见 [测试说明](../../tests/README.md)。
 
 ## 对话与模型设置
 
