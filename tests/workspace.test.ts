@@ -248,7 +248,7 @@ test("回复与方案原子保存，失败不会留下孤立回复", () => {
   const valid = applyCommand(state, { type: "reply", message, proposal });
   assert.equal(valid.messages.length, 1);
   assert.equal(valid.proposals.length, 1);
-  proposal.changes[0].taskVersion++;
+  proposal.changes[0].taskVersion = state.tasks[0].version + 1;
   assert.throws(
     () => applyCommand(state, { type: "reply", message, proposal }),
     /变化/,
@@ -343,11 +343,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=4");
+  db.exec("PRAGMA user_version=5");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 4);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 5);
   inspect.close();
 });
 

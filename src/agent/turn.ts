@@ -4,6 +4,9 @@ import {
   newTask,
   taskSchema,
   taskPatchSchema,
+  recurrenceRuleSchema,
+  arrangementSchema,
+  taskSubtreeIds,
   childTaskSchema,
   agentMemorySchema,
   type State,
@@ -11,7 +14,8 @@ import {
   type Change,
   type Command,
 } from "../domain/model";
-import { applyCommand } from "../domain/operations";
+import { applyCommand, checkRecurringTaskPatch } from "../domain/operations";
+import { findOccurrence, synchronizeRecurrence } from "../domain/recurrence";
 
 const authorization = {
   mode: z
@@ -28,6 +32,13 @@ const existingTask = {
     ),
   ...authorization,
 };
+const occurrenceTarget = {
+  ...existingTask,
+  date: z.iso.date().describe("该重复实例的本地日期，必须是 context.date"),
+};
+const recurrence = recurrenceRuleSchema.describe(
+  "daily 为每天，weekly 的 weekdays 使用 0=周日、1=周一至 6=周六，range 的 start/end 是含首尾的 YYYY-MM-DD。",
+);
 // 拒绝旧字段并交给同一工具循环修正，避免将已移除的内容静默丢弃。
 const agentTaskPatchSchema = taskPatchSchema
   .strict()
@@ -45,6 +56,7 @@ export const agentActionSchema = z.discriminatedUnion("type", [
       .describe("本轮新任务的临时引用，后续action.taskId可使用此值"),
     title: taskSchema.shape.title.describe("根据对话自主概括的简洁任务标题"),
     patch: agentTaskPatchSchema,
+    recurrence: recurrence.optional(),
     ...authorization,
   }),
   z.object({
@@ -86,6 +98,49 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     ...existingTask,
     children: z.array(childTaskSchema.strict()).min(1).max(20),
   }),
+  z
+    .object({
+      type: z.literal("updateRecurrence"),
+      ...existingTask,
+      recurrence,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("deleteRecurringTask"),
+      ...existingTask,
+      includeChildren: z
+        .boolean()
+        .optional()
+        .describe("删除也会级联删除子任务，明确覆盖全部子任务时填写 true"),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("updateOccurrenceScope"),
+      ...occurrenceTarget,
+      scope: arrangementSchema.shape.scope,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("setOccurrenceDone"),
+      ...occurrenceTarget,
+      done: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("skipOccurrence"),
+      ...occurrenceTarget,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("restoreOccurrence"),
+      ...occurrenceTarget,
+    })
+    .strict(),
   z.object({
     type: z.literal("resolve"),
     proposalId: z.string(),
@@ -101,6 +156,17 @@ export const agentTurnSchema = z.object({
 });
 export type AgentTurn = z.infer<typeof agentTurnSchema>;
 
+const recurringChangeLabels: Partial<
+  Record<AgentTurn["actions"][number]["type"], string>
+> = {
+  updateRecurrence: "设置重复规则",
+  deleteRecurringTask: "删除重复模板",
+  updateOccurrenceScope: "修改今日范围",
+  setOccurrenceDone: "记录今日完成状态",
+  skipOccurrence: "移除今日重复实例",
+  restoreOccurrence: "撤销今日移除",
+};
+
 /** 整轮结果在内存中计算，任何一步失败都会丢弃整份新状态。 */
 export function applyAgentTurn(
   previous: State,
@@ -114,6 +180,7 @@ export function applyAgentTurn(
   if (!previous.sessions.some((s) => s.id === sessionId))
     throw new Error("对话不存在。");
   let state = structuredClone(previous);
+  synchronizeRecurrence(state, date);
   const apply = (command: Command) => {
     state = applyCommand(state, command, date);
   };
@@ -137,6 +204,7 @@ export function applyAgentTurn(
     if (action.type === "createTask") {
       if (action.mode !== "direct")
         throw new Error("创建任务需要用户明确要求记录。");
+      if (action.recurrence) checkRecurringTaskPatch(action.patch);
       const duplicate = state.tasks.find(
         (t) => t.title.trim() === action.title.trim(),
       );
@@ -145,6 +213,7 @@ export function applyAgentTurn(
         ...newTask(),
         ...taskPatch(action.patch),
         title: action.title,
+        ...(action.recurrence ? { recurrence: action.recurrence } : {}),
       };
       if (action.ref) {
         if (
@@ -172,10 +241,21 @@ export function applyAgentTurn(
       });
       continue;
     }
-    const sourceTask = state.tasks.find(
-      (t) => t.id === (references.get(action.taskId) ?? action.taskId),
-    );
-    if (!sourceTask)
+    const sourceId = references.get(action.taskId) ?? action.taskId;
+    const sourceTask = state.tasks.find((t) => t.id === sourceId);
+    const occurrence =
+      action.type === "updateOccurrenceScope" ||
+      action.type === "setOccurrenceDone" ||
+      action.type === "skipOccurrence" ||
+      action.type === "restoreOccurrence"
+        ? findOccurrence(
+            state,
+            sourceId,
+            action.date,
+            action.type === "restoreOccurrence",
+          )
+        : undefined;
+    if (!sourceTask && !occurrence)
       throw new Error(
         `操作${action.type}引用的任务${action.taskId}不存在。请使用已保存任务id或本批createTask.ref，本批已声明的ref为${JSON.stringify([...references.keys()])}。待接受拆分尚未建立真实子任务，今日建议可关联父任务并在scope写具体范围。修正引用后保留完整操作重新提交。`,
       );
@@ -183,7 +263,7 @@ export function applyAgentTurn(
     if (action.type === "updateArrangement") {
       if (
         !state.arrangements.some(
-          (item) => item.taskId === sourceTask.id && item.date === action.date,
+          (item) => item.taskId === sourceId && item.date === action.date,
         )
       )
         throw new Error(
@@ -191,16 +271,26 @@ export function applyAgentTurn(
         );
       const targetId = action.targetTaskId
         ? (references.get(action.targetTaskId) ?? action.targetTaskId)
-        : sourceTask.id;
+        : sourceId;
       const target = state.tasks.find((item) => item.id === targetId);
       if (!target) throw new Error("替换安排的目标任务不存在。");
       task = target;
     }
-    if (sourceTask.recurrence || task.recurrence)
-      throw new Error("重复任务及其当日安排目前请在工作台手动操作。");
+    if (
+      (sourceTask?.recurrence || task?.recurrence) &&
+      (action.type === "schedule" ||
+        action.type === "unschedule" ||
+        action.type === "updateArrangement" ||
+        action.type === "stage" ||
+        action.type === "split")
+    )
+      throw new Error("请选择对应的重复任务操作，今日实例使用单次操作。");
+    if (sourceTask?.recurrence && action.type === "updateTask")
+      checkRecurringTaskPatch(action.patch);
     // 模型选择直接落地的拆分若与现有待接受条目完全相同，复用该条目执行，
     // 让真实子任务与接受记录同步，避免另建一份已接受记录而遗留原卡片。
-    if (action.type === "split" && action.mode === "direct") {
+    if (task && action.type === "split" && action.mode === "direct") {
+      const { id, version } = task;
       const matching = state.proposals
         .filter((item) => item.sessionId === sessionId)
         .flatMap((item) =>
@@ -209,8 +299,8 @@ export function applyAgentTurn(
               (change) =>
                 change.type === "split" &&
                 change.status === "pending" &&
-                change.taskId === task.id &&
-                change.taskVersion === task.version &&
+                change.taskId === id &&
+                change.taskVersion === version &&
                 JSON.stringify(change.children) ===
                   JSON.stringify(action.children),
             )
@@ -227,14 +317,23 @@ export function applyAgentTurn(
         continue;
       }
     }
+    const title = task?.title ?? occurrence?.recurrence?.title;
+    let descendantIds: string[] | undefined;
+    if (action.type === "deleteRecurringTask") {
+      const descendants = taskSubtreeIds(state.tasks, [sourceId]);
+      descendants.delete(sourceId);
+      descendantIds = [...descendants];
+      if (descendantIds.length && !action.includeChildren)
+        throw new Error("删除模板也会删除其子任务，请核实删除范围。");
+    }
+    const label =
+      recurringChangeLabels[action.type] ??
+      (action.type === "split" ? "拆分" : "调整");
     const change: Change = {
       id: crypto.randomUUID(),
-      taskId: task.id,
-      taskVersion: task.version,
-      label:
-        action.type === "split"
-          ? `拆分「${task.title}」`
-          : `调整「${task.title}」`,
+      taskId: task?.id ?? sourceId,
+      taskVersion: task?.version ?? null,
+      label: `${label}「${title}」`,
       reason: `${action.mode === "direct" ? "按用户要求" : "待用户接受的建议"}，本轮原话为${userText}`,
       type:
         action.type === "updateTask"
@@ -242,7 +341,13 @@ export function applyAgentTurn(
           : action.type === "updateArrangement"
             ? "schedule"
             : action.type,
-      date: "date" in action ? action.date : "",
+      date:
+        "date" in action
+          ? action.date
+          : action.type === "updateRecurrence" ||
+              action.type === "deleteRecurringTask"
+            ? date
+            : "",
       scope: "scope" in action ? action.scope : "",
       children: action.type === "split" ? action.children : [],
       status: "pending",
@@ -252,8 +357,13 @@ export function applyAgentTurn(
       ...(action.type === "schedule" && action.fromDate
         ? { fromDate: action.fromDate }
         : {}),
-      ...(action.type === "stage" ? { done: action.done } : {}),
-      ...(action.type === "updateArrangement"
+      ...("done" in action ? { done: action.done } : {}),
+      ...(action.type === "updateRecurrence"
+        ? { recurrence: action.recurrence }
+        : {}),
+      ...(occurrence ? { occurrence } : {}),
+      ...(descendantIds ? { descendantIds } : {}),
+      ...(action.type === "updateArrangement" && sourceTask
         ? {
             fromTaskId: sourceTask.id,
             fromTaskVersion: sourceTask.version,
@@ -280,13 +390,16 @@ export function applyAgentTurn(
   }
   // 先完成本轮事实和已授权操作，再给尚未接受的建议绑定最新任务版本。
   for (const change of proposal.changes) {
-    change.taskVersion = state.tasks.find(
-      (t) => t.id === change.taskId,
-    )!.version;
-    if (change.fromTaskId)
-      change.fromTaskVersion = state.tasks.find(
-        (task) => task.id === change.fromTaskId,
-      )!.version;
+    const task = state.tasks.find((item) => item.id === change.taskId);
+    if (!task && !change.occurrence)
+      throw new Error("建议所引用的任务已在本轮删除，请重新核对。");
+    if (task?.recurrence && change.patch) checkRecurringTaskPatch(change.patch);
+    change.taskVersion = task?.version ?? null;
+    if (change.fromTaskId) {
+      const source = state.tasks.find((item) => item.id === change.fromTaskId);
+      if (!source) throw new Error("原安排所属任务已在本轮删除，请重新核对。");
+      change.fromTaskVersion = source.version;
+    }
   }
   const session = state.sessions.find((item) => item.id === sessionId)!;
   if (turn.memory) session.agentMemory = turn.memory;

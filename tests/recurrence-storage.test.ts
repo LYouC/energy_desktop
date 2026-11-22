@@ -103,7 +103,7 @@ test("跨日时使用旧工作区版本操作会刷新安排并提示重试", (t
   );
 });
 
-test("Agent 不会提交目前只能手动修改的重复任务方案", () => {
+test("Agent 不会用普通安排动作覆盖重复实例", () => {
   const task = {
     ...newTask(),
     title: "复习",
@@ -120,14 +120,15 @@ test("Agent 不会提交目前只能手动修改的重复任务方案", () => {
         text: "建议调整",
         actions: [
           {
-            type: "updateTask",
+            type: "schedule",
             taskId: task.id,
             mode: "proposal",
-            patch: { status: "done" },
+            date: "2026-11-20",
+            scope: "复习第二章",
           },
         ],
       }),
-    /重复任务.*手动/,
+    /请选择对应的重复任务操作/,
   );
 });
 

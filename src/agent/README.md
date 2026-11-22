@@ -19,13 +19,13 @@
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
 
-重复任务规则和当天实例只作为规划背景。`readTask` 读取当天的重复实例，往日执行记录留在工作台的「重复记录」中。重复模板与实例目前由用户手动操作。Agent 写入扩展见 [开发计划](../../docs/开发计划.md#agent-操作重复任务)。
+上下文的 `today` 和 `skippedToday` 分别列出今日安排与当天已移除的重复实例。`readTask` 可用实例保存的 taskId 核对这两处记录，包括模板已删除的实例。往日重复执行记录在工作台的「重复记录」中。
 
 每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。每次生成共用一套最多六步的工具循环。运行层对可重试的服务或网络故障最多退避重试三次，共享两分钟总时限；取消立即终止等待，业务校验和鉴权失败不会自动重试。
 
 SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服务默认推理模式的兼容性见 [Agent 验证记录](../../docs/Agent验证记录.md)。参数说明见 [SiliconFlow 官方文档](https://docs.siliconflow.cn/docs/api/chat-completions-post)。
 
-提交前比较任务、安排、方案、能量、偏好和会话工作记忆的快照。`WorkspaceDatabase.commitAgentTurn` 在一次事务中保存动作、方案、记忆和助手回复。成功回复使用运行标识生成持久化 ID，使重启后的同一请求能识别为已提交。
+提交前比较任务、安排、当天已移除实例、方案、能量、偏好和会话工作记忆的快照，并核对预演所用的本地日期。`WorkspaceDatabase.commitAgentTurn` 在一次事务中保存动作、方案、记忆和助手回复。成功回复使用运行标识生成持久化 ID，使重启后的同一请求能识别为已提交。
 
 成功预演后的回复步骤支持流式预览，决策前和混合工具步骤中的文字留在模型循环中。提交前遇到取消、超时或生成失败时，保留已保存的用户消息。
 
@@ -38,7 +38,11 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 | `calculateCapacity` | 计算可用时间、任务估时和缓冲的容量关系                 |
 | `prepareTurn`       | 提交 intent、actions 及可选 memory，预演后返回业务回执 |
 
-`prepareTurn.actions` 支持八种动作。`createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增安排或移期，`updateArrangement` 修改已有安排，`unschedule` 取消安排，`stage` 完成或恢复当日阶段，`resolve` 接受或拒绝方案条目。它们共用同一业务应用器。
+`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝方案条目。
+
+重复任务在 `createTask` 动作顶层填写 `recurrence`。已存在任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除模板。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效。模板删除会同时删除后代任务，并保留已生成的重复实例。存在子任务时需明确指定 `includeChildren`。
+
+当天的单次动作是 `updateOccurrenceScope`、`setOccurrenceDone`、`skipOccurrence`、`restoreOccurrence`。均使用实例的 taskId 和本地日期。规则和实例的待接受条目使用同一方案流程，版本、日期或相关实例快照变化时需重新核对。回执返回规则、今日结果、移除记录、删除模板和待接受条目。
 
 `turn.ts` 定义这些动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。新增计划建议保存为待接受方案，已授权操作直接执行。
 

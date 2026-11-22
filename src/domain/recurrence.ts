@@ -1,5 +1,19 @@
 import type { Arrangement, RecurrenceRule, State } from "./model";
 
+export function findOccurrence(
+  state: State,
+  taskId: string,
+  date: string,
+  skipped = false,
+): Arrangement | undefined {
+  const matches = (item: Arrangement) =>
+    item.taskId === taskId && item.date === date && item.recurrence;
+  return skipped
+    ? state.skippedOccurrences?.find(({ arrangement }) => matches(arrangement))
+        ?.arrangement
+    : state.arrangements.find(matches);
+}
+
 function utcDay(date: string) {
   return new Date(`${date}T00:00:00.000Z`);
 }

@@ -21,6 +21,9 @@ export function buildContext(
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 10),
     today: state.arrangements.filter((item) => item.date === date),
+    skippedToday: (state.skippedOccurrences ?? [])
+      .map(({ arrangement }) => arrangement)
+      .filter((arrangement) => arrangement.date === date),
     unfinishedTasks: active.map((task) => ({
       ...task,
       previousArrangements: state.arrangements.filter(

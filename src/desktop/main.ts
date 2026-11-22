@@ -53,10 +53,18 @@ app.whenReady().then(() => {
   const agentConfig = new AgentConfig(app.getPath("userData"), safeStorage);
   const runtime = new AgentRuntime(
     {
+      currentDate: () => getDatabase().currentDate(),
       load: () => getDatabase().load(),
       execute: (revision, command) => getDatabase().execute(revision, command),
-      commitAgentTurn: (revision, sessionId, text, turn, replyId) =>
-        getDatabase().commitAgentTurn(revision, sessionId, text, turn, replyId),
+      commitAgentTurn: (revision, sessionId, text, turn, replyId, date) =>
+        getDatabase().commitAgentTurn(
+          revision,
+          sessionId,
+          text,
+          turn,
+          replyId,
+          date,
+        ),
     },
     () => agentConfig.connection(),
   );

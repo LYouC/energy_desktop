@@ -32,6 +32,8 @@ Pinia 的 `workspace` 持有业务数据的界面副本，所有写入串行调�
 
 ## 对话与模型设置
 
+重复任务的待接受方案在对话卡显示频率或当天操作，沿用逐项接受和拒绝。规则修改、模板删除与当天实例分开显示。
+
 `ChatPanel.vue` 管理流式预览、取消和失败后的本轮重试。重试复用原请求并清空失败尝试的流式预览。`ChatHistory.vue` 管理分页与删除确认，使用[会话领域规则](../domain/conversations.ts)统一排序。`ModelSettings.vue` 展示公开模型配置与凭据状态，使用过的 Key 从输入状态清空。
 
 上下文预览复用 [Agent 上下文构建](../agent/context.ts)。发送消息、提交任务和保存模型设置都走[桌面桥接](../desktop/README.md)。`tests/agent-ui.desktop.mjs` 使用本地测试传输验证对话交互。

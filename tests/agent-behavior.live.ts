@@ -332,4 +332,126 @@ await run(
     assert.equal(next.proposals[0].changes[0].status, "accepted");
   },
 );
+const today = localDate();
+const rangeEnd = new Date(`${today}T12:00:00`);
+rangeEnd.setDate(rangeEnd.getDate() + 2);
+const end = localDate(rangeEnd);
+await run(
+  "B09a 创建三种重复规则并设置今天范围",
+  emptyState(),
+  `帮我设置三个重复任务：每天拉伸，今天做五分钟；每周一、三、五慢跑；从今天到 ${end} 每天复习。`,
+  ["按明确授权直接设置规则，区分模板和本次范围，回复说明已保存的频率。"],
+  (_before, next) => {
+    assert.equal(next.tasks.length, 3);
+    const daily = next.tasks.find((task) => task.title.includes("拉伸"));
+    const weekly = next.tasks.find((task) => task.title.includes("慢跑"));
+    const range = next.tasks.find((task) => task.title.includes("复习"));
+    assert.deepEqual(daily?.recurrence, { type: "daily" });
+    assert.deepEqual(weekly?.recurrence, {
+      type: "weekly",
+      weekdays: [1, 3, 5],
+    });
+    assert.deepEqual(range?.recurrence, {
+      type: "range",
+      start: today,
+      end,
+    });
+    const occurrence = next.arrangements.find(
+      (item) => item.taskId === daily?.id,
+    );
+    assert.equal(occurrence?.date, today);
+    assert.match(occurrence?.scope ?? "", /[五5]\s*分钟/);
+    assert.equal(occurrence?.done, false);
+  },
+);
+
+const stretch = {
+  ...newTask(),
+  title: "拉伸",
+  recurrence: { type: "daily" as const },
+};
+const repeating = applyCommand(
+  emptyState(),
+  { type: "saveTask", task: stretch },
+  today,
+);
+await run(
+  "B09b 跳过今天并调整后续规律",
+  repeating,
+  "今天的拉伸跳过，以后改成每周一、三、五。",
+  ["按明确授权移出今天并更新模板，说明新规则从次日生效。"],
+  (_before, next) => {
+    assert.deepEqual(next.tasks[0].recurrence, {
+      type: "weekly",
+      weekdays: [1, 3, 5],
+    });
+    assert.deepEqual(next.arrangements, []);
+    assert.equal(next.skippedOccurrences?.[0].arrangement.date, today);
+  },
+);
+await run(
+  "B09c 只提重复变更建议",
+  repeating,
+  "帮我把拉伸改为每周一、三、五的想法列成待接受方案，先别应用，今天照旧。",
+  ["提供可接受的规则变更，说明今日不变和待接受状态。"],
+  (before, next) => {
+    assert.deepEqual(next.tasks, before.tasks);
+    assert.deepEqual(next.arrangements, before.arrangements);
+    const change = next.proposals.at(-1)?.changes[0];
+    assert.equal(change?.type, "updateRecurrence");
+    assert.equal(change?.status, "pending");
+    assert.deepEqual(change?.recurrence, {
+      type: "weekly",
+      weekdays: [1, 3, 5],
+    });
+  },
+);
+const recurringProposal = applyAgentTurn(
+  repeating,
+  repeating.activeSessionId,
+  "先给我一个减轻重复负担的方案。",
+  {
+    text: "建议以后每周一、三、五拉伸，今天这次保留。",
+    actions: [
+      {
+        type: "updateRecurrence",
+        mode: "proposal",
+        taskId: stretch.id,
+        recurrence: { type: "weekly", weekdays: [1, 3, 5] },
+      },
+    ],
+  },
+  undefined,
+  today,
+);
+await run(
+  "B09d 接受已展示的重复规则",
+  recurringProposal,
+  "可以，就按这条新规则执行。",
+  ["通过原方案生效，只接受明确同意的规则。"],
+  (before, next) => {
+    assert.deepEqual(next.tasks[0].recurrence, {
+      type: "weekly",
+      weekdays: [1, 3, 5],
+    });
+    assert.deepEqual(next.arrangements, before.arrangements);
+    assert.equal(next.proposals.at(-1)?.changes[0].status, "accepted");
+  },
+);
+const deleted = applyCommand(
+  repeating,
+  { type: "deleteTask", id: stretch.id },
+  today,
+);
+await run(
+  "B09e 完成已删除模板的当天实例",
+  deleted,
+  "今天那次拉伸我已经做完了，帮我标记一下。",
+  ["从当天记录定位已删除模板的实例，准确说明只完成本次。"],
+  (_before, next) => {
+    assert.deepEqual(next.tasks, []);
+    assert.equal(next.arrangements.length, 1);
+    assert.equal(next.arrangements[0].done, true);
+  },
+);
 save();

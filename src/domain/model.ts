@@ -25,8 +25,8 @@ export const importanceLabels: Record<
 };
 const recurrenceDate = z.iso.date();
 export const recurrenceRuleSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("daily") }),
-  z.object({
+  z.strictObject({ type: z.literal("daily") }),
+  z.strictObject({
     type: z.literal("weekly"),
     weekdays: z
       .array(z.number().int().min(0).max(6))
@@ -39,7 +39,7 @@ export const recurrenceRuleSchema = z.discriminatedUnion("type", [
       .transform((days) => days.sort((a, b) => a - b)),
   }),
   z
-    .object({
+    .strictObject({
       type: z.literal("range"),
       start: recurrenceDate,
       end: recurrenceDate,
@@ -86,7 +86,7 @@ export function taskSubtreeIds(
   }
   return ids;
 }
-// 用户在任务编辑器设置重要性和重复规则。
+// 重要性和重复规则分别处理，避免由通用属性修改隐式变更。
 export const taskPatchSchema = taskSchema
   .omit({
     id: true,
@@ -122,10 +122,22 @@ export type Arrangement = z.infer<typeof arrangementSchema>;
 const changeSchema = z.object({
   id: z.string(),
   taskId: z.string(),
-  taskVersion: z.number(),
+  taskVersion: z.number().nullable(),
   label: z.string(),
   reason: z.string(),
-  type: z.enum(["schedule", "split", "update", "unschedule", "stage"]),
+  type: z.enum([
+    "schedule",
+    "split",
+    "update",
+    "unschedule",
+    "stage",
+    "updateRecurrence",
+    "deleteRecurringTask",
+    "updateOccurrenceScope",
+    "setOccurrenceDone",
+    "skipOccurrence",
+    "restoreOccurrence",
+  ]),
   date: z.string(),
   scope: z.string(),
   // 读取已经保存的旧拆分时，将 goal 归入说明。模型工具只暴露新字段。
@@ -143,6 +155,9 @@ const changeSchema = z.object({
   fromTaskId: z.string().optional(),
   fromTaskVersion: z.number().int().optional(),
   done: z.boolean().optional(),
+  recurrence: recurrenceRuleSchema.optional(),
+  occurrence: arrangementSchema.optional(),
+  descendantIds: z.array(z.string()).optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
 export const proposalSchema = z.object({

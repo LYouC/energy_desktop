@@ -84,6 +84,7 @@ export function planningSnapshot(state: State) {
   return JSON.stringify([
     state.tasks,
     state.arrangements,
+    state.skippedOccurrences,
     state.proposals,
     state.energy,
     state.preferences,
@@ -102,6 +103,7 @@ export async function generateAgentTurn(options: {
   signal: AbortSignal;
   emit: (event: Omit<AgentEvent, "runId">) => void;
   model?: LanguageModel;
+  date?: string;
 }): Promise<{ turn: AgentTurn; trace: TurnTrace }> {
   const { state, sessionId, userText, connection, signal, emit } = options;
   const provider = createOpenAICompatible({
@@ -117,7 +119,7 @@ export async function generateAgentTurn(options: {
   const validationErrors: string[] = [];
   emit({ type: "status", text: "正在结合最新任务与背景分析…" });
   const context = {
-    ...buildContext(state, sessionId),
+    ...buildContext(state, sessionId, options.date),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     focusedId: options.focusedId,
   };
@@ -154,15 +156,31 @@ export async function generateAgentTurn(options: {
       // 同一SDK循环内预演并返回具体业务结果。最终回复必须基于这份结果。
       // 所有真实写入仍在最后一次事务中完成，取消不会留下半轮变更。
       try {
-        const next = applyAgentTurn(state, sessionId, userText, {
-          text: "[等待最终回复]",
-          actions,
-          ...(nextMemory ? { memory: nextMemory } : {}),
-        });
+        const next = applyAgentTurn(
+          state,
+          sessionId,
+          userText,
+          {
+            text: "[等待最终回复]",
+            actions,
+            ...(nextMemory ? { memory: nextMemory } : {}),
+          },
+          undefined,
+          context.date,
+        );
         const oldTasks = new Map(state.tasks.map((task) => [task.id, task]));
         const changedTasks = next.tasks.filter(
           (task) => oldTasks.get(task.id)?.version !== task.version,
         );
+        const nextTasks = new Map(next.tasks.map((task) => [task.id, task]));
+        const withTaskTitle = ({
+          taskId,
+          ...arrangement
+        }: State["arrangements"][number]) => ({
+          ...arrangement,
+          taskTitle:
+            nextTasks.get(taskId)?.title ?? arrangement.recurrence?.title,
+        });
         prepared = actions;
         memory = next.sessions.find(
           (session) => session.id === sessionId,
@@ -182,26 +200,50 @@ export async function generateAgentTurn(options: {
               expectedDate,
               description,
               parentId,
+              recurrence,
             }) => ({
               title,
               status,
               startDate,
               expectedDate,
               description,
-              parentTitle:
-                next.tasks.find((task) => task.id === parentId)?.title ?? null,
+              recurrence,
+              parentTitle: parentId
+                ? (nextTasks.get(parentId)?.title ?? null)
+                : null,
             }),
           ),
-          arrangements: next.arrangements.map(({ taskId, ...arrangement }) => ({
-            ...arrangement,
-            taskTitle: next.tasks.find((task) => task.id === taskId)!.title,
-          })),
+          deletedTasks: state.tasks
+            .filter((task) => !nextTasks.has(task.id))
+            .map(({ title }) => title),
+          arrangements: next.arrangements
+            .filter((item) => !item.recurrence || item.date === context.date)
+            .map(withTaskTitle),
+          skippedToday: (next.skippedOccurrences ?? [])
+            .filter(({ arrangement }) => arrangement.date === context.date)
+            .map(({ arrangement }) => withTaskTitle(arrangement)),
+          resolvedChanges: actions.flatMap((action) => {
+            if (action.type !== "resolve") return [];
+            const proposal = next.proposals.find(
+              (item) => item.id === action.proposalId,
+            );
+            return (proposal?.changes ?? [])
+              .filter((change) => action.ids.includes(change.id))
+              .map(({ label, status }) => ({ label, status }));
+          }),
           pendingChanges: next.proposals
             .filter((proposal) => proposal.sessionId === sessionId)
             .flatMap((proposal) =>
               proposal.changes
                 .filter((change) => change.status === "pending")
-                .map(({ label, type, scope }) => ({ label, type, scope })),
+                .map(({ label, type, scope, date, recurrence, done }) => ({
+                  label,
+                  type,
+                  scope,
+                  date,
+                  recurrence,
+                  done,
+                })),
             ),
         };
       } catch (error) {
@@ -267,7 +309,7 @@ export async function generateAgentTurn(options: {
       }),
       readTask: tool({
         description:
-          "按任务ID查看名称、状态、用户标注的重要性、预计起止日期、完整说明、所属任务、子任务与历史安排。更新说明前核实旧内容，合并仍有效的事实与要求。",
+          "按任务ID查看属性、子任务、普通安排与当天重复实例，包括已从今天移除的实例。已删除的模板返回 task:null，仍可通过 ID 查其当天实例。更新说明前核实旧内容。",
         inputSchema: z.object({ taskId: z.string() }),
         execute: async ({ taskId }) => {
           emit({ type: "status", text: "正在查看相关任务背景…" });
@@ -278,6 +320,9 @@ export async function generateAgentTurn(options: {
               (item) =>
                 item.taskId === taskId &&
                 (!item.recurrence || item.date === context.date),
+            ),
+            skippedToday: context.skippedToday.filter(
+              (item) => item.taskId === taskId,
             ),
           };
         },
@@ -358,6 +403,7 @@ export class AgentRuntime {
   private active?: { runId: string; controller: AbortController };
   constructor(
     private database: {
+      currentDate: () => string;
       load: () => State;
       execute: (revision: number, command: Command) => State;
       commitAgentTurn: (
@@ -366,6 +412,7 @@ export class AgentRuntime {
         userText: string,
         turn: AgentTurn,
         replyId?: string,
+        expectedDate?: string,
       ) => State;
     },
     private connection: () => Connection,
@@ -405,6 +452,7 @@ export class AgentRuntime {
         focusedId: z.string().nullable(),
       })
       .parse(input);
+    const date = this.database.currentDate();
     let state = this.database.load();
     const messageId = `${request.runId}:user`;
     const replyId = `${request.runId}:assistant`;
@@ -442,6 +490,7 @@ export class AgentRuntime {
       const snapshot = planningSnapshot(state);
       const { turn } = await this.generateWithRetry({
         state,
+        date,
         sessionId: request.sessionId,
         focusedId: request.focusedId,
         userText: request.text,
@@ -463,6 +512,7 @@ export class AgentRuntime {
         request.text,
         turn,
         replyId,
+        date,
       );
       return next;
     } catch (error) {
@@ -472,7 +522,7 @@ export class AgentRuntime {
       if (
         error instanceof Error &&
         (error.message === retriesExhausted ||
-          /^(分析期间任务或状态已变化|模型未生成可应用的完整结果|对话不存在。$)/.test(
+          /^(分析期间(?:任务或状态|本地日期)已变化|模型未生成可应用的完整结果|对话不存在。$)/.test(
             error.message,
           ))
       )

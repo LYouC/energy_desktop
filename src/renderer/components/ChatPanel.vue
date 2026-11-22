@@ -23,6 +23,7 @@ import Modal from "./Modal.vue";
 import ModelSettings from "./ModelSettings.vue";
 import ChatHistory from "./ChatHistory.vue";
 import { useWorkspace } from "@/stores/workspace";
+import { recurrenceLabel } from "@/lib/recurrence";
 import { buildContext } from "../../agent/context";
 import { statusLabels, type Change, type Proposal } from "../../domain/model";
 const props = defineProps<{ focusedId: string | null; collapsed: boolean }>();
@@ -261,6 +262,23 @@ function proposalStatus(proposal: Proposal) {
     : "已拒绝";
 }
 function changeSummary(change: Change) {
+  switch (change.type) {
+    case "updateRecurrence":
+      return change.recurrence ? recurrenceLabel(change.recurrence) : "";
+    case "deleteRecurringTask": {
+      const children = change.descendantIds?.length ?? 0;
+      const scope = children ? `同时删除 ${children} 项子任务。 ` : "";
+      return `${scope}停止生成新实例，保留已生成的重复记录。`;
+    }
+    case "updateOccurrenceScope":
+      return `${change.date} · ${change.scope}`;
+    case "setOccurrenceDone":
+      return `${change.date} · ${change.done ? "完成这次" : "恢复为未完成"}`;
+    case "skipOccurrence":
+      return `${change.date} · 移出当天安排`;
+    case "restoreOccurrence":
+      return `${change.date} · 恢复当天安排`;
+  }
   if (change.type === "schedule")
     return `${change.fromDate ? `${change.fromDate} → ` : ""}${change.date} · ${change.scope}`;
   if (change.type === "split")

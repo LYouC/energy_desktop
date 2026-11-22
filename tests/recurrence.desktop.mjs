@@ -184,6 +184,80 @@ try {
   await editOrdinary.getByLabel("本次阶段目标").fill("整理四个要点");
   await editOrdinary.getByRole("button", { name: "保存并安排" }).click();
   await expect(ordinary).toContainText("整理四个要点");
+
+  // 用保存的 Agent 方案验证真实 IPC、方案卡和部分接受。
+  await page.evaluate(async () => {
+    const state = await window.desktop.load();
+    const task = state.tasks.find((item) => item.title === "整理纪要");
+    const occurrence = state.arrangements.find(
+      (item) => item.recurrence?.title === "练英语",
+    );
+    const sessionId = state.activeSessionId;
+    const proposalId = crypto.randomUUID();
+    const pending = {
+      reason: "用户希望先看建议",
+      date: occurrence.date,
+      scope: "",
+      children: [],
+      status: "pending",
+    };
+    await window.desktop.execute(state.revision, {
+      type: "reply",
+      message: {
+        id: crypto.randomUUID(),
+        sessionId,
+        role: "assistant",
+        text: "两项建议待确认。",
+        createdAt: new Date().toISOString(),
+        proposalId,
+      },
+      proposal: {
+        id: proposalId,
+        sessionId,
+        createdAt: new Date().toISOString(),
+        changes: [
+          {
+            ...pending,
+            id: crypto.randomUUID(),
+            label: "设置重复规则「整理纪要」",
+            type: "updateRecurrence",
+            taskId: task.id,
+            taskVersion: task.version,
+            recurrence: { type: "daily" },
+          },
+          {
+            ...pending,
+            id: crypto.randomUUID(),
+            label: "记录今日完成状态「练英语」",
+            type: "setOccurrenceDone",
+            taskId: occurrence.taskId,
+            taskVersion: null,
+            occurrence,
+            done: false,
+          },
+        ],
+      },
+    });
+  });
+  await page.reload();
+  const plan = page.locator(".proposal");
+  await expect(plan).toContainText("每天");
+  await expect(plan).toContainText("恢复为未完成");
+  await plan
+    .getByRole("button", { name: "接受这项", exact: true })
+    .first()
+    .click();
+  await expect(plan).toContainText("部分接受");
+  const accepted = await page.evaluate(() => window.desktop.load());
+  expect(
+    accepted.tasks.find((item) => item.title === "整理纪要").recurrence,
+  ).toEqual({ type: "daily" });
+  expect(
+    accepted.arrangements.find((item) => item.recurrence?.title === "练英语")
+      .done,
+  ).toBe(true);
+  await plan.getByRole("button", { name: "拒绝", exact: true }).click();
+
   await page.getByRole("button", { name: "我的空间 本地保存" }).click();
   await page.getByLabel("主题").selectOption("dark");
   await page.getByRole("button", { name: "保存设置" }).click();
@@ -206,7 +280,7 @@ try {
     .toBe(true);
   expect(errors).toEqual([]);
   console.log(
-    "PASS: recurring task editing, filters, skipping and undo, scope, deletion, restart and history",
+    "PASS: recurring task editing, history, restart and Agent proposal acceptance",
   );
 } finally {
   await app?.close();

@@ -12,7 +12,7 @@ import { applyAgentTurn } from "../agent/turn";
 import { conversationLimit, trimConversations } from "../domain/conversations";
 import { migrateWorkspaceV1 } from "./migrations";
 
-const workspaceVersion = 3;
+const workspaceVersion = 4;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -60,6 +60,9 @@ export class WorkspaceDatabase {
       throw error;
     }
   }
+  currentDate() {
+    return this.today();
+  }
   load(): State {
     return this.loadForDate(this.today());
   }
@@ -92,10 +95,13 @@ export class WorkspaceDatabase {
     userText: string,
     turn: unknown,
     replyId?: string,
+    expectedDate?: string,
   ) {
-    return this.transact(revision, (previous, date) =>
-      applyAgentTurn(previous, sessionId, userText, turn, replyId, date),
-    );
+    return this.transact(revision, (previous, date) => {
+      if (expectedDate && date !== expectedDate)
+        throw new Error("分析期间本地日期已变化，请重新发送。");
+      return applyAgentTurn(previous, sessionId, userText, turn, replyId, date);
+    });
   }
   private transact(
     revision: number,

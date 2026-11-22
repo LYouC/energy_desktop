@@ -7,6 +7,88 @@ import { WorkspaceDatabase } from "../src/persistence/storage";
 import { emptyState } from "../src/domain/model";
 import { applyAgentTurn } from "../src/agent/turn";
 
+test("SDK 预演返回重复规则、已删除模板与保留的今天实例", async (context) => {
+  const date = "2026-11-23";
+  const db = new WorkspaceDatabase(":memory:", () => date);
+  context.after(() => db.close());
+  let calls = 0;
+  let taskId: string;
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      calls++;
+      const prepare = (actions: unknown[]) =>
+        response([
+          { name: "prepareTurn", input: { intent: "changes", actions } },
+        ]);
+      const receipt = JSON.stringify(
+        options.prompt.filter((item) => item.role === "tool"),
+      );
+      switch (calls) {
+        case 1:
+          assert(JSON.stringify(options.prompt).includes(date));
+          return prepare([
+            {
+              type: "createTask",
+              mode: "direct",
+              title: "拉伸",
+              patch: {},
+              recurrence: { type: "weekly", weekdays: [1, 3, 5] },
+            },
+          ]);
+        case 2:
+          assert.match(
+            receipt,
+            /"recurrence":\{"type":"weekly","weekdays":\[1,3,5\]\}/,
+          );
+          return response([], "已设置每周一、三、五拉伸。");
+        case 3:
+          return prepare([
+            { type: "deleteRecurringTask", mode: "direct", taskId },
+          ]);
+        case 4:
+          assert.match(receipt, /"deletedTasks":\["拉伸"\]/);
+          assert.match(receipt, /"taskTitle":"拉伸"/);
+          return response([], "已删除模板，今天这次仍在。");
+        case 5:
+          return response([{ name: "readTask", input: { taskId } }]);
+        case 6:
+          assert.match(receipt, /"task":null/);
+          assert.match(receipt, /"title":"拉伸"/);
+          return prepare([
+            { type: "skipOccurrence", mode: "direct", taskId, date },
+          ]);
+        default:
+          assert.match(receipt, /"skippedToday":\[\{/);
+          return response([], "已移出今天的拉伸。");
+      }
+    },
+  });
+  const runtime = new AgentRuntime(
+    db,
+    () => connection,
+    (options) => generateAgentTurn({ ...options, model }),
+  );
+  const send = (text: string) =>
+    runtime.send(
+      {
+        runId: crypto.randomUUID(),
+        sessionId: db.load().activeSessionId,
+        text,
+        focusedId: null,
+      },
+      () => {},
+    );
+  const created = await send("每周一、三、五拉伸，帮我设一下");
+  taskId = created.tasks[0].id;
+  const deleted = await send("删除拉伸模板");
+  assert.deepEqual(deleted.tasks, []);
+  assert.equal(deleted.arrangements[0].taskId, taskId);
+  const skipped = await send("把留下的今天这次拉伸移出安排");
+  assert.deepEqual(skipped.arrangements, []);
+  assert.equal(skipped.skippedOccurrences?.[0].arrangement.taskId, taskId);
+  assert.equal(calls, 7);
+});
+
 function response(
   calls: { name: string; input: unknown }[],
   text = "",

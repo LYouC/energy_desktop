@@ -23,10 +23,10 @@ Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑�
 
 重复模板在任务中保存 `recurrence`，支持每天、每周自选星期和起止日期内每天。`synchronizeRecurrence(state, date)` 按本地日期结算到当天。每个模板每日至多一条实例，同日已有安排沿用原位置、范围与完成状态。实例保存当时的名称，跨日后未完成的实例显示为错过。规则编辑从次日生效。
 
-当天的实例可以完成、调序、修改范围或移除。移除单独保存当天能撤销所需的数据，实例随即从队列和历史统计移除。删除模板会停止后续生成，已产生的实例仍可查询，今天这次仍可操作。普通任务与子任务的级联删除同样保留已产生的重复实例。Agent 的动作协议暂时只允许使用普通任务的写规则。
+当天的实例可以完成、调序、修改范围或移除。移除单独保存当天能撤销所需的数据，实例随即从队列和历史统计移除。删除模板会停止后续生成，已产生的实例仍可查询，今天这次仍可操作。普通任务与子任务的级联删除同样保留已产生的重复实例。Agent 通过方案应用器复用保存、删除和当天实例操作。重复条目校验本地日期，当天实例还校验快照，模板删除时核对后代范围。
 
 验证使用 `npm test`。Agent 动作复用同一业务入口和方案规则。
 
 `conversations.ts` 以最近活动时间排序，最多保留 1000 个会话。工作区 schema 允许旧会话省略 `agentMemory`。Agent 动作的授权语义、工作记忆与历史查询由 [Agent 模块](../agent/README.md)说明。
 
-`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。
+`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。`agent-recurrence.test.ts` 覆盖对话动作、部分接受、跨日及混合操作回滚。
