@@ -24,6 +24,7 @@ import TaskCard from "./components/TaskCard.vue";
 import OccurrenceEditor from "./components/OccurrenceEditor.vue";
 import RecurrenceHistory from "./components/RecurrenceHistory.vue";
 import ChatPanel from "./components/ChatPanel.vue";
+import WindowTitleBar from "./components/WindowTitleBar.vue";
 import { deletionOrder, useTaskSelection } from "./composables/taskSelection";
 import {
   affectedRecurringTasks,
@@ -401,6 +402,7 @@ async function energy(event: Event) {
 }
 </script>
 <template>
+  <WindowTitleBar />
   <div v-if="!store.ready" class="loading">
     <Leaf :size="30" />
     <h1>息序</h1>

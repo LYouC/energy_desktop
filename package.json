@@ -12,7 +12,7 @@
     "test": "tsx --test tests/*.test.ts",
     "pack": "install-electron && npm run build && electron-builder --win dir --config.electronDist=node_modules/electron/dist",
     "pack:installer": "install-electron && npm run build && electron-builder --win nsis --x64 --publish never --config.electronDist=node_modules/electron/dist",
-    "test:desktop": "npm run build && node tests/desktop.smoke.mjs && node tests/review.desktop.mjs && node tests/agent-ui.desktop.mjs && node tests/today.desktop.mjs && node tests/task-fields.desktop.mjs && node tests/recurrence.desktop.mjs",
+    "test:desktop": "npm run build && node tests/desktop.smoke.mjs && node tests/review.desktop.mjs && node tests/agent-ui.desktop.mjs && node tests/agent-context.desktop.mjs && node tests/today.desktop.mjs && node tests/task-fields.desktop.mjs && node tests/recurrence.desktop.mjs",
     "test:agent:live": "node --import tsx tests/agent.live.ts",
     "test:agent:journey": "node --import tsx tests/agent-journey.live.ts",
     "test:agent:behavior": "node --import tsx tests/agent-behavior.live.ts",

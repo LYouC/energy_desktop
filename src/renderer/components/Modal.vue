@@ -11,12 +11,23 @@ import {
 import { X } from "lucide-vue-next";
 defineProps<{ title: string; description?: string }>();
 const open = defineModel<boolean>("open", { required: true });
+
+function keepOpenForWindowControls(
+  event: CustomEvent<{ originalEvent: Event }>,
+) {
+  const target = event.detail.originalEvent.target;
+  if (target instanceof Element && target.closest(".window-titlebar"))
+    event.preventDefault();
+}
 </script>
 <template>
   <DialogRoot v-model:open="open"
     ><DialogPortal
       ><DialogOverlay class="modal-overlay" />
-      <DialogContent class="modal-content">
+      <DialogContent
+        class="modal-content"
+        @interact-outside="keepOpenForWindowControls"
+      >
         <div class="modal-heading">
           <DialogTitle>{{ title }}</DialogTitle><DialogClose
             class="icon-button"

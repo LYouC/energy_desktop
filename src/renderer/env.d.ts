@@ -2,12 +2,23 @@
 interface Window {
   desktop: {
     ping(): Promise<string>;
+    isWindowMaximized(): Promise<boolean>;
+    controlWindow(action: "minimize" | "toggleMaximize" | "close"): void;
+    onWindowMaximized(callback: (maximized: boolean) => void): () => void;
     load(): Promise<import("../domain/model").State>;
     execute(
       revision: number,
       command: import("../domain/model").Command,
     ): Promise<import("../domain/model").State>;
-    agentConfig(): Promise<{ baseURL: string; model: string; hasKey: boolean }>;
+    agentConfig(): Promise<{
+      baseURL: string;
+      model: string;
+      hasKey: boolean;
+      contextDebug: boolean;
+    }>;
+    agentContext(
+      sessionId: string,
+    ): Promise<import("../desktop/agent-context").AgentContextTurn[]>;
     configureAgent(input: {
       baseURL: string;
       model: string;
@@ -18,6 +29,7 @@ interface Window {
       sessionId: string;
       text: string;
       focusedId: string | null;
+      source?: "optimizeToday";
     }): Promise<import("../domain/model").State>;
     cancelAgent(runId: string): Promise<void>;
     onAgentEvent(

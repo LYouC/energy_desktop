@@ -20,6 +20,30 @@ async function launch() {
 }
 let { app, page } = await launch();
 try {
+  const maximized = () =>
+    app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].isMaximized(),
+    );
+  const maximize = page.getByRole("button", { name: "最大化窗口" });
+  await maximize.focus();
+  await page.keyboard.press("Enter");
+  const restore = page.getByRole("button", { name: "还原窗口" });
+  await expect(restore).toBeVisible();
+  await expect.poll(maximized).toBe(true);
+  await restore.click();
+  await expect.poll(maximized).toBe(false);
+  await page.getByRole("button", { name: "最小化窗口" }).click();
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].isMinimized(),
+      ),
+    )
+    .toBe(true);
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].restore(),
+  );
+
   for (const [title, description] of [
     ["完成产品调研报告", "形成可检查的初稿"],
     ["英语练习", "完成一次阅读练习"],
@@ -62,6 +86,13 @@ try {
   await expect(page.locator(".context-preview")).toContainText(
     "晚上保留休息时间",
   );
+  await page.locator('.window-controls [aria-label="最大化窗口"]').click();
+  await expect.poll(maximized).toBe(true);
+  await expect(
+    page.getByRole("dialog", { name: "当前上下文预览" }),
+  ).toBeVisible();
+  await page.locator('.window-controls [aria-label="还原窗口"]').click();
+  await expect.poll(maximized).toBe(false);
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByLabel("和息序聊聊").fill("保留这段输入草稿");
   await page.waitForTimeout(400);
@@ -100,6 +131,9 @@ try {
   console.log(
     "PASS: CRUD, latest energy, themes, context, SQLite restart, draft, narrow layout",
   );
+  const closed = page.waitForEvent("close");
+  await page.getByRole("button", { name: "关闭窗口" }).click();
+  await closed;
 } finally {
   await app.close();
 }

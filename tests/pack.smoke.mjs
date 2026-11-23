@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 const directory = await mkdtemp(path.join(tmpdir(), "xixu-pack-agent-"));
 const app = await electron.launch({
-  executablePath: path.resolve("release/win-unpacked/息序.exe"),
+  executablePath: path.resolve(
+    process.argv[2] ?? "release/win-unpacked/息序.exe",
+  ),
   env: { ...process.env, XIXU_DATA_DIR: directory, XIXU_API_KEY: "" },
 });
 try {
@@ -12,9 +14,13 @@ try {
   expect((await page.evaluate(() => window.desktop.load())).tasks).toHaveLength(
     0,
   );
-  expect((await page.evaluate(() => window.desktop.agentConfig())).hasKey).toBe(
-    false,
+  expect(await page.evaluate(() => window.desktop.agentConfig())).toMatchObject(
+    {
+      hasKey: false,
+      contextDebug: false,
+    },
   );
+  await expect(page.getByRole("button", { name: "调试上下文" })).toHaveCount(0);
   await page.getByRole("button", { name: "模型设置", exact: true }).click();
   await expect(page.getByLabel("模型 API Key")).toHaveValue("");
   console.log(

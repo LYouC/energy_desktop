@@ -97,6 +97,42 @@ test("成功runId跨runtime重建仍幂等，复用ID改消息会失败", async 
   );
   db.close();
 });
+test("失败的一键优化保留草稿，重试不能省略来源扩大权限", async (context) => {
+  const db = new WorkspaceDatabase(":memory:");
+  context.after(() => db.close());
+  const input = {
+    ...request("请优化今日安排"),
+    sessionId: db.load().activeSessionId,
+  };
+  const optimization = { ...input, source: "optimizeToday" };
+  db.execute(db.load().revision, {
+    type: "draft",
+    sessionId: input.sessionId,
+    text: "未发送草稿",
+  });
+  const failed = new AgentRuntime(db, connection, async () => {
+    throw new Error("模拟模型错误");
+  });
+  await assert.rejects(
+    failed.send(optimization, () => {}),
+    /模型调用/,
+  );
+  assert.equal(db.load().sessions[0].draft, "未发送草稿");
+  let calls = 0;
+  const restarted = new AgentRuntime(db, connection, async () => {
+    calls++;
+    return result;
+  });
+  await assert.rejects(
+    restarted.send(input, () => {}),
+    /标识/,
+  );
+  assert.equal(calls, 0);
+  const retried = await restarted.send(optimization, () => {});
+  assert.equal(retried.messages.length, 2);
+  assert.equal(retried.sessions[0].draft, "未发送草稿");
+});
+
 test("并发被拒绝，取消后不提交业务结果且后续可继续", async () => {
   const db = new WorkspaceDatabase(":memory:");
   const input = { ...request(), sessionId: db.load().activeSessionId };

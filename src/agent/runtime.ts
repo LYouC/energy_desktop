@@ -104,12 +104,21 @@ export async function generateAgentTurn(options: {
   emit: (event: Omit<AgentEvent, "runId">) => void;
   model?: LanguageModel;
   date?: string;
+  suggestOnly?: boolean;
+  onModelRequest?: (body: string) => void;
 }): Promise<{ turn: AgentTurn; trace: TurnTrace }> {
   const { state, sessionId, userText, connection, signal, emit } = options;
   const provider = createOpenAICompatible({
     name: "siliconflow",
     baseURL: connection.baseURL,
     apiKey: connection.apiKey,
+    fetch: options.onModelRequest
+      ? (input, init) => {
+          if (typeof init?.body === "string")
+            options.onModelRequest?.(init.body);
+          return globalThis.fetch(input, init);
+        }
+      : undefined,
   });
   let finalText: string | undefined;
   let memory: AgentTurn["memory"];
@@ -156,6 +165,13 @@ export async function generateAgentTurn(options: {
       // 同一SDK循环内预演并返回具体业务结果。最终回复必须基于这份结果。
       // 所有真实写入仍在最后一次事务中完成，取消不会留下半轮变更。
       try {
+        if (
+          options.suggestOnly &&
+          actions.some((action) => action.mode === "direct")
+        )
+          throw new Error(
+            "一键优化只允许提出待用户接受的方案，请改用 proposal 或仅交流。",
+          );
         const next = applyAgentTurn(
           state,
           sessionId,
@@ -443,6 +459,10 @@ export class AgentRuntime {
   async send(
     input: unknown,
     emit: (event: AgentEvent) => void,
+    onModelRequest?: (
+      run: { runId: string; sessionId: string },
+      body: string,
+    ) => void,
   ): Promise<State> {
     const request = z
       .object({
@@ -450,17 +470,20 @@ export class AgentRuntime {
         sessionId: z.string(),
         text: z.string().trim().min(1).max(20000),
         focusedId: z.string().nullable(),
+        source: z.literal("optimizeToday").optional(),
       })
       .parse(input);
     const date = this.database.currentDate();
     let state = this.database.load();
     const messageId = `${request.runId}:user`;
     const replyId = `${request.runId}:assistant`;
+    const suggestOnly = request.source === "optimizeToday";
     const previousMessage = state.messages.find((m) => m.id === messageId);
     if (
       previousMessage &&
       (previousMessage.sessionId !== request.sessionId ||
-        previousMessage.text !== request.text)
+        previousMessage.text !== request.text ||
+        previousMessage.source !== request.source)
     )
       throw new Error("请求标识已经用于其他消息，请重新发送。");
     // 成功标识与结果在同一事务保存，重启后也能识别重试。
@@ -485,18 +508,22 @@ export class AgentRuntime {
             role: "user",
             text: request.text,
             createdAt: new Date().toISOString(),
+            source: request.source,
           },
         });
       const snapshot = planningSnapshot(state);
       const { turn } = await this.generateWithRetry({
         state,
         date,
+        suggestOnly,
         sessionId: request.sessionId,
         focusedId: request.focusedId,
         userText: request.text,
         connection: this.connection(),
         signal: controller.signal,
         emit: (event) => emit({ ...event, runId: request.runId }),
+        onModelRequest:
+          onModelRequest && ((body) => onModelRequest(request, body)),
       });
       controller.signal.throwIfAborted();
       const latest = this.database.load();

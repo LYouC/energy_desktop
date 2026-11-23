@@ -22,11 +22,20 @@ import Button from "./ui/button/Button.vue";
 import Modal from "./Modal.vue";
 import ModelSettings from "./ModelSettings.vue";
 import ChatHistory from "./ChatHistory.vue";
+import AgentContextDebug from "./AgentContextDebug.vue";
 import { useWorkspace } from "@/stores/workspace";
 import { recurrenceLabel } from "@/lib/recurrence";
 import { buildContext } from "../../agent/context";
-import { statusLabels, type Change, type Proposal } from "../../domain/model";
-const props = defineProps<{ focusedId: string | null; collapsed: boolean }>();
+import {
+  localDate,
+  statusLabels,
+  type Change,
+  type Proposal,
+} from "../../domain/model";
+const props = defineProps<{
+  focusedId: string | null;
+  collapsed: boolean;
+}>();
 const emit = defineEmits<{
   "update:collapsed": [value: boolean];
   resize: [width: number | null];
@@ -44,6 +53,15 @@ const chatMaxWidth = 560;
 let stopResize: (() => void) | null = null;
 const settingsOpen = ref(false);
 const configured = ref(false);
+const contextDebug = ref(false);
+const emptyOptimization = ref(false);
+const checkingToday = ref(false);
+const hasPendingToday = computed(() => {
+  const today = localDate();
+  return store.state.arrangements.some(
+    (item) => item.date === today && !item.done,
+  );
+});
 const runError = ref("");
 const resolveError = ref("");
 type AgentRequest = Parameters<Window["desktop"]["sendAgent"]>[0];
@@ -74,6 +92,7 @@ watch(
     runError.value = "";
     resolveError.value = "";
     retryRequest.value = undefined;
+    emptyOptimization.value = false;
     draft.value =
       store.state.sessions.find((item) => item.id === sessionId.value)?.draft ||
       "";
@@ -152,12 +171,13 @@ async function sendReal(request: AgentRequest, isRetry = false) {
   const token = ++generation;
   runError.value = "";
   retryRequest.value = undefined;
+  const preserveDraft = request.source === "optimizeToday";
   if (!isRetry) {
     try {
       await store.dispatch({
         type: "draft",
         sessionId: request.sessionId,
-        text: request.text,
+        text: preserveDraft ? draft.value : request.text,
       });
     } catch {
       if (token === generation) {
@@ -167,7 +187,7 @@ async function sendReal(request: AgentRequest, isRetry = false) {
       return;
     }
     if (token !== generation) return;
-    draft.value = "";
+    if (!preserveDraft) draft.value = "";
   }
   activeRunId = request.runId;
   if (!messages.value.some((message) => message.id === `${request.runId}:user`))
@@ -202,8 +222,11 @@ async function sendReal(request: AgentRequest, isRetry = false) {
     }
   }
 }
-async function send() {
-  if (!draft.value.trim() || running.value) return;
+async function send(
+  text = draft.value.trim(),
+  source?: AgentRequest["source"],
+) {
+  if (!text || running.value) return;
   if (!configured.value) {
     settingsOpen.value = true;
     return;
@@ -211,9 +234,26 @@ async function send() {
   await sendReal({
     runId: crypto.randomUUID(),
     sessionId: sessionId.value,
-    text: draft.value.trim(),
-    focusedId: props.focusedId,
+    text,
+    focusedId: source === "optimizeToday" ? null : props.focusedId,
+    source,
   });
+}
+async function optimizeToday() {
+  if (running.value || checkingToday.value) return;
+  const session = sessionId.value;
+  checkingToday.value = true;
+  try {
+    if (!(await store.load()) || session !== sessionId.value) return;
+    emptyOptimization.value = !hasPendingToday.value;
+  } finally {
+    checkingToday.value = false;
+  }
+  if (emptyOptimization.value) return;
+  await send(
+    "请看看今天还未完成的安排，结合任务优先级、当前能量和已知时间约束，看看怎样安排更合适。如果有调整，请只提出待我接受的方案，不要直接修改任务或安排。如果今天没有待推进的安排，请告诉我。",
+    "optimizeToday",
+  );
 }
 async function resolve(proposal: Proposal, changes: Change[], accept: boolean) {
   resolveError.value = "";
@@ -304,7 +344,9 @@ function changeSummary(change: Change) {
 }
 async function refreshConfig() {
   try {
-    configured.value = (await window.desktop.agentConfig()).hasKey;
+    const config = await window.desktop.agentConfig();
+    configured.value = config.hasKey;
+    contextDebug.value = config.contextDebug;
   } catch {
     configured.value = false;
   }
@@ -499,20 +541,36 @@ onBeforeUnmount(() => {
           >
             重新分析
           </button>
+          <button :disabled="running || checkingToday" @click="optimizeToday">
+            一键优化
+          </button>
         </div>
-        <form class="composer" @submit.prevent="send">
+        <p
+          v-if="emptyOptimization && !hasPendingToday"
+          class="optimization-note muted"
+          role="status"
+        >
+          今天没有待推进的安排可优化。
+        </p>
+        <form class="composer" @submit.prevent="send()">
           <textarea
             v-model="draft"
             :disabled="running"
             aria-label="和息序聊聊"
             placeholder="说说想做的事，或此刻的感受…"
             rows="3"
-            @keydown.ctrl.enter.prevent="send"
+            @keydown.ctrl.enter.prevent="send()"
           />
           <div class="composer-bottom">
             <button type="button" class="context-link" @click="inspectContext">
-              查看当前上下文</button
-            ><button
+              查看当前上下文
+            </button>
+            <AgentContextDebug
+              v-if="contextDebug"
+              :key="sessionId"
+              :session-id="sessionId"
+            />
+            <button
               v-if="running"
               class="send"
               type="button"
@@ -556,6 +614,9 @@ onBeforeUnmount(() => {
   display: grid;
   justify-items: start;
   gap: 8px;
+}
+.optimization-note {
+  margin-bottom: 10px;
 }
 .chat-footer {
   align-items: center;

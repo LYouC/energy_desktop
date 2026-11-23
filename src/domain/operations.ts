@@ -619,7 +619,7 @@ export function applyCommand(
         (item) => item.id === command.message.sessionId,
       )!;
       if (command.message.role === "user") {
-        session.draft = "";
+        if (command.message.source !== "optimizeToday") session.draft = "";
         if (session.title === "新的对话")
           session.title = command.message.text.slice(0, 18);
       }

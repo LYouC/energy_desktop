@@ -208,6 +208,7 @@ export const stateSchema = z.object({
       text: z.string(),
       createdAt: z.string(),
       proposalId: z.string().optional(),
+      source: z.literal("optimizeToday").optional(),
     }),
   ),
   energy: z.object({

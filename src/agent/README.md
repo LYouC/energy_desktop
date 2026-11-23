@@ -15,9 +15,11 @@
 
 ## 调用与数据流
 
-界面通过有限 IPC 调用 `sendAgent({runId, sessionId, text, focusedId})`，订阅 `onAgentEvent` 的文本增量和状态，使用 `cancelAgent(runId)` 中止。模型设置通过 `agentConfig` 获取公开配置，通过 `configureAgent` 保存。公开配置只包含地址、模型和是否存在 Key。
+界面通过有限 IPC 调用 `sendAgent({runId, sessionId, text, focusedId})`，订阅 `onAgentEvent` 的文本增量和状态，使用 `cancelAgent(runId)` 中止。模型设置通过 `agentConfig` 获取地址、模型和 Key 是否可用，通过 `configureAgent` 保存。`agentConfig` 同时提供桌面调试入口是否启用。
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
+
+「一键优化」通过 `sendAgent` 的 `source: "optimizeToday"` 标记请求。用户消息保留已有草稿，`prepareTurn` 拒绝直接执行业务动作，并通过工具回执交给模型修正。开发版可在模型服务的传输入口捕获实际 JSON 请求体，包含系统指令、工作区上下文、消息、工具定义及后续步骤的回执。
 
 每轮构建上下文时读取操作系统本地时间，将 `YYYY-MM-DD HH:mm` 写入 `context.time` 和系统指令。Agent 直接使用本轮时间回答当前日期和钟点，安排使用工作区日期及 `calendar` 锚点。离线 SDK 测试核对决策和终答都收到同一时间，B10 校验真实模型的回复。
 

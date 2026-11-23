@@ -29,4 +29,6 @@ Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑�
 
 `conversations.ts` 以最近活动时间排序，最多保留 1000 个会话。工作区 schema 允许旧会话省略 `agentMemory`。Agent 动作的授权语义、工作记忆与历史查询由 [Agent 模块](../agent/README.md)说明。
 
+一键优化以 `source: "optimizeToday"` 标记并保存用户消息，保留同一会话的草稿。普通用户消息仍清空草稿，旧消息无需迁移。
+
 `npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。`agent-recurrence.test.ts` 覆盖对话动作、部分接受、跨日及混合操作回滚。

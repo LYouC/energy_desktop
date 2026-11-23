@@ -17,6 +17,7 @@
   --button-ink: #fffefa;
   --control: #6a765f;
   --danger: #904b3f;
+  --titlebar-height: 35px;
 }
 :root.dark {
   color-scheme: dark;
@@ -155,6 +156,42 @@ button:hover:not(:disabled) {
   gap: 16px;
   justify-items: start;
 }
+.window-titlebar {
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 12;
+  pointer-events: auto;
+  display: flex;
+  justify-content: flex-end;
+  height: var(--titlebar-height);
+  padding: 3px 5px 3px 0;
+  background: var(--rail);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.window-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 3px;
+}
+.window-controls button {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  outline-offset: -2px;
+}
+.window-controls button:hover {
+  background: var(--soft);
+  filter: none;
+}
+.window-controls .window-close:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--rail));
+}
 .app-shell {
   --sidebar-expanded: 228px;
   --sidebar-collapsed: 64px;
@@ -169,7 +206,7 @@ button:hover:not(:disabled) {
   grid-template-columns:
     var(--sidebar-w) minmax(var(--workspace-min), 1fr)
     var(--chat-col);
-  height: 100dvh;
+  height: calc(100dvh - var(--titlebar-height));
   transition: grid-template-columns 0.22s ease;
 }
 .sidebar {
@@ -998,8 +1035,8 @@ body.chat-resizing .chat-resizer::after {
 }
 .composer-bottom {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   margin-top: 7px;
 }
 .context-link {
@@ -1010,6 +1047,7 @@ body.chat-resizing .chat-resizer::after {
   padding: 0;
 }
 .send {
+  margin-inline-start: auto;
   width: 30px;
   height: 30px;
   border: 0;
@@ -1028,7 +1066,7 @@ body.chat-resizing .chat-resizer::after {
 }
 .modal-overlay {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-height) 0 0;
   background: #10181070;
   z-index: 10;
 }
@@ -1243,6 +1281,6 @@ select[multiple] {
   .sidebar {
     position: sticky;
     top: 0;
-    height: 100dvh;
+    height: 100%;
   }
 }
