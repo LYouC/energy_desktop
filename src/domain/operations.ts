@@ -16,8 +16,11 @@ import {
 } from "./model";
 import { deleteConversation, trimConversations } from "./conversations";
 import {
+  arrangementAncestorIds,
+  effectiveRecurrences,
   findOccurrence,
   nextRecurrenceDate,
+  occurrenceSnapshot,
   synchronizeRecurrence,
 } from "./recurrence";
 import { z } from "zod";
@@ -26,6 +29,24 @@ function findTask(state: State, id: string) {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) throw new Error("任务已被删除，请刷新后重试。");
   return task;
+}
+export function unscheduledTasksDue(state: State, date: string) {
+  const recurrences = effectiveRecurrences(state.tasks);
+  const planned = new Set(
+    state.arrangements
+      .filter((item) => item.date === date)
+      .map((item) => item.taskId),
+  );
+  for (const { arrangement } of state.skippedOccurrences ?? [])
+    if (arrangement.date === date) planned.add(arrangement.taskId);
+  return state.tasks.filter(
+    (task) =>
+      task.expectedDate === date &&
+      task.status !== "done" &&
+      task.status !== "abandoned" &&
+      !recurrences.get(task.id) &&
+      !planned.has(task.id),
+  );
 }
 function checkRelations(tasks: Task[]) {
   for (const task of tasks) {
@@ -55,10 +76,10 @@ export function checkRecurringTaskPatch(
 }
 
 function checkRecurrence(
-  state: State,
   task: Task,
   old: Task | undefined,
   date: string,
+  replacesRule: boolean,
 ) {
   const rule = task.recurrence;
   if (!rule) return;
@@ -70,19 +91,14 @@ function checkRecurrence(
       old?.recurrence?.type === "range" && old.recurrence.start === rule.start;
     if (rule.start < date && !continuingRange)
       throw new Error("重复开始日期不能早于今天。");
-    if (old?.recurrence && rule.end <= date)
+    if (replacesRule && rule.end <= date)
       throw new Error("新规则从明天生效，结束日期需在今天之后。");
   }
-  // Existing rules were synchronized before the save. The replacement starts
-  // after today, even if the old range had already ended.
-  const cursor = state.repeatCursors?.find((item) => item.taskId === task.id);
-  if (old?.recurrence && cursor && cursor.through < date) cursor.through = date;
 }
-function advanceTaskVersion(state: State, arrangement: Arrangement) {
-  const task = state.tasks.find((item) => item.id === arrangement.taskId);
-  if (task) task.version++;
-  else if (!arrangement.recurrence)
-    throw new Error("任务已被删除，请刷新后重试。");
+function advanceArrangementVersion(state: State, arrangement: Arrangement) {
+  if (arrangement.recurrence)
+    arrangement.occurrenceVersion = (arrangement.occurrenceVersion ?? 0) + 1;
+  else findTask(state, arrangement.taskId).version++;
 }
 function schedule(state: State, taskId: string, date: string, scope: string) {
   const task = findTask(state, taskId);
@@ -117,12 +133,27 @@ function removeArrangement(state: State, taskId: string, date: string) {
   state.arrangements.splice(index, 1);
   findTask(state, taskId).version++;
 }
+export function pendingStageDescendants(
+  state: State,
+  taskId: string,
+  date: string,
+) {
+  const tasks = new Map(state.tasks.map((task) => [task.id, task]));
+  return state.arrangements.filter(
+    (item) =>
+      item.date === date &&
+      !item.done &&
+      arrangementAncestorIds(tasks, item).includes(taskId),
+  );
+}
+
 function setStage(
   state: State,
   taskId: string,
   date: string,
   done: boolean,
-  today?: string,
+  today: string,
+  descendantIds?: readonly string[],
 ) {
   const item = state.arrangements.find(
     (item) => item.taskId === taskId && item.date === date,
@@ -130,8 +161,45 @@ function setStage(
   if (!item) throw new Error("这项安排已变化。");
   if (item.recurrence && date !== today)
     throw new Error("请在今日安排中处理当天的重复任务。");
-  item.done = done;
-  advanceTaskVersion(state, item);
+  const descendants =
+    done && date === today
+      ? pendingStageDescendants(state, taskId, date).filter(
+          (stage) => !descendantIds || descendantIds.includes(stage.taskId),
+        )
+      : [];
+  for (const stage of [item, ...descendants]) {
+    if (stage.done === done) continue;
+    stage.done = done;
+    advanceArrangementVersion(state, stage);
+  }
+}
+function createOccurrence(
+  state: State,
+  taskId: string,
+  date: string,
+  scope: string,
+  today: string,
+) {
+  if (date !== today) throw new Error("只能补加当天的重复实例。");
+  const task = findTask(state, taskId);
+  if (!effectiveRecurrences(state.tasks).get(taskId))
+    throw new Error("请选择重复模板。");
+  if (findOccurrence(state, taskId, date, true))
+    throw new Error("这次安排已移除，请使用撤销移除。");
+  if (
+    state.arrangements.some(
+      (item) => item.taskId === taskId && item.date === date,
+    )
+  )
+    throw new Error("当天已有安排，请调整已有安排。");
+  const tasks = new Map(state.tasks.map((item) => [item.id, item]));
+  state.arrangements.push({
+    taskId,
+    date,
+    scope,
+    done: false,
+    recurrence: occurrenceSnapshot(tasks, task),
+  });
 }
 function activeOccurrence(
   state: State,
@@ -189,7 +257,7 @@ function skipOccurrence(
     nextTaskIds: taskIds.slice(position + 1),
   });
   state.arrangements.splice(index, 1);
-  advanceTaskVersion(state, arrangement);
+  advanceArrangementVersion(state, arrangement);
 }
 function restoreOccurrence(
   state: State,
@@ -215,7 +283,7 @@ function restoreOccurrence(
     dayIndices[occurrencePosition(taskIds, removed)] ??
     (dayIndices.at(-1) ?? state.arrangements.length - 1) + 1;
   state.arrangements.splice(position, 0, removed.arrangement);
-  advanceTaskVersion(state, removed.arrangement);
+  advanceArrangementVersion(state, removed.arrangement);
 }
 function saveTask(
   state: State,
@@ -240,13 +308,36 @@ function saveTask(
   };
   if (old?.recurrence && !task.recurrence) task.recurrence = old.recurrence;
   checkDates(task);
-  checkRecurrence(state, task, old, date);
+  const ruleChanged = old
+    ? old.parentId !== task.parentId ||
+      JSON.stringify(old.recurrence) !== JSON.stringify(task.recurrence)
+    : Boolean(task.parentId || task.recurrence);
+  const previousRecurrences = ruleChanged
+    ? effectiveRecurrences(state.tasks)
+    : undefined;
+  checkRecurrence(task, old, date, Boolean(previousRecurrences?.get(task.id)));
   if (old) state.tasks[state.tasks.indexOf(old)] = task;
   else state.tasks.push(task);
   checkRelations(state.tasks);
   if (arrangement)
     schedule(state, task.id, arrangement.date, arrangement.scope);
-  if (task.recurrence && !old?.recurrence) synchronizeRecurrence(state, date);
+  if (previousRecurrences) {
+    const recurrences = effectiveRecurrences(state.tasks);
+    const cursors = new Map(
+      state.repeatCursors?.map((cursor) => [cursor.taskId, cursor]),
+    );
+    for (const member of state.tasks) {
+      const previous = previousRecurrences.get(member.id);
+      const current = recurrences.get(member.id);
+      if (JSON.stringify(previous) === JSON.stringify(current)) continue;
+      if (member !== task) member.version++;
+      const cursor = cursors.get(member.id);
+      // A replacement rule starts tomorrow, including when the old range ended.
+      if (previous && current && cursor && cursor.through < date)
+        cursor.through = date;
+    }
+    synchronizeRecurrence(state, date);
+  }
 }
 function deleteTask(state: State, id: string) {
   findTask(state, id);
@@ -265,7 +356,7 @@ function deleteTask(state: State, id: string) {
         (ids.has(change.taskId) ||
           (change.fromTaskId && ids.has(change.fromTaskId))) &&
         change.status === "pending" &&
-        !isOccurrenceChange(change)
+        (!isOccurrenceChange(change) || change.type === "createOccurrence")
       )
         change.status = "rejected";
     }
@@ -280,11 +371,12 @@ function updateOccurrenceScope(
   const index = activeOccurrence(state, taskId, date, today);
   const arrangement = state.arrangements[index];
   arrangement.scope = scope;
-  advanceTaskVersion(state, arrangement);
+  advanceArrangementVersion(state, arrangement);
 }
 
 function isOccurrenceChange(change: Change) {
   return (
+    change.type === "createOccurrence" ||
     change.type === "updateOccurrenceScope" ||
     change.type === "setOccurrenceDone" ||
     change.type === "skipOccurrence" ||
@@ -301,9 +393,15 @@ function isRecurringChange(change: Change) {
 }
 
 function checkChangeVersion(state: State, change: Change) {
-  const version = isOccurrenceChange(change)
-    ? (state.tasks.find((task) => task.id === change.taskId)?.version ?? null)
-    : findTask(state, change.taskId).version;
+  if (isOccurrenceChange(change) && change.type !== "createOccurrence") {
+    if (
+      change.taskVersion !== null &&
+      !state.tasks.some(({ id }) => id === change.taskId)
+    )
+      throw new Error("任务已变化，这部分方案需要重新分析。");
+    return;
+  }
+  const version = findTask(state, change.taskId).version;
   if (version !== change.taskVersion)
     throw new Error("任务已变化，这部分方案需要重新分析。");
 }
@@ -311,7 +409,7 @@ function checkChangeVersion(state: State, change: Change) {
 function checkRecurringTarget(state: State, change: Change, today: string) {
   if (change.date !== today)
     throw new Error("本地日期已变化，请重新核对这项重复任务操作。");
-  if (!isOccurrenceChange(change)) return;
+  if (!isOccurrenceChange(change) || change.type === "createOccurrence") return;
   const occurrence = findOccurrence(
     state,
     change.taskId,
@@ -323,9 +421,27 @@ function checkRecurringTarget(state: State, change: Change, today: string) {
     !change.occurrence?.recurrence ||
     occurrence.scope !== change.occurrence.scope ||
     occurrence.done !== change.occurrence.done ||
-    occurrence.recurrence?.title !== change.occurrence.recurrence.title
+    occurrence.recurrence?.title !== change.occurrence.recurrence.title ||
+    (occurrence.occurrenceVersion ?? 0) !==
+      (change.occurrence.occurrenceVersion ?? 0)
   )
     throw new Error("这次重复任务已变化，请重新核对当天安排。");
+}
+
+function checkCompletionScope(state: State, change: Change, today: string) {
+  if (
+    (change.type !== "stage" && change.type !== "setOccurrenceDone") ||
+    !change.done ||
+    change.date !== today
+  )
+    return;
+  const pending = pendingStageDescendants(state, change.taskId, today);
+  const confirmed = new Set(change.descendantIds);
+  if (
+    pending.length !== confirmed.size ||
+    pending.some((item) => !confirmed.has(item.taskId))
+  )
+    throw new Error("子任务的今日完成范围已变化，请重新核对。");
 }
 
 function applyRecurringChange(
@@ -347,7 +463,8 @@ function applyRecurringChange(
   }
   if (change.type === "deleteRecurringTask") {
     const task = findTask(state, change.taskId);
-    if (!task.recurrence) throw new Error("请选择重复模板。");
+    if (!effectiveRecurrences(state.tasks).get(task.id))
+      throw new Error("请选择重复模板。");
     const descendants = taskSubtreeIds(state.tasks, [task.id]);
     descendants.delete(task.id);
     const expected = new Set(change.descendantIds);
@@ -362,6 +479,15 @@ function applyRecurringChange(
   }
   const { taskId, date } = change;
   switch (change.type) {
+    case "createOccurrence":
+      createOccurrence(
+        state,
+        taskId,
+        date,
+        arrangementSchema.shape.scope.parse(change.scope),
+        today,
+      );
+      break;
     case "updateOccurrenceScope":
       updateOccurrenceScope(
         state,
@@ -374,7 +500,14 @@ function applyRecurringChange(
     case "setOccurrenceDone":
       if (change.done === undefined) throw new Error("本次完成状态缺失。");
       activeOccurrence(state, taskId, date, today);
-      setStage(state, taskId, date, change.done, today);
+      setStage(
+        state,
+        taskId,
+        date,
+        change.done,
+        today,
+        change.descendantIds ?? [],
+      );
       break;
     case "skipOccurrence":
       skipOccurrence(state, taskId, date, today);
@@ -399,6 +532,7 @@ function addProposal(
   for (const change of proposal.changes) {
     if (change.status !== "pending") throw new Error("新方案条目必须待接受。");
     checkChangeVersion(state, change);
+    checkCompletionScope(state, change, date);
     if (preview && isRecurringChange(change)) {
       checkRecurringTarget(state, change, date);
       applyRecurringChange(structuredClone(state), change, date, now);
@@ -426,11 +560,28 @@ export function applyCommand(
     case "schedule":
       schedule(state, command.taskId, command.date, command.scope);
       break;
+    case "scheduleDueToday": {
+      if (command.date !== date) break;
+      const task = unscheduledTasksDue(state, date).find(
+        ({ id }) => id === command.taskId,
+      );
+      if (task) schedule(state, task.id, date, task.title);
+      break;
+    }
     case "unschedule":
       removeArrangement(state, command.taskId, command.date);
       break;
     case "stage":
       setStage(state, command.taskId, command.date, command.done, date);
+      break;
+    case "createOccurrence":
+      createOccurrence(
+        state,
+        command.taskId,
+        command.date,
+        command.scope,
+        date,
+      );
       break;
     case "skipOccurrence":
       skipOccurrence(state, command.taskId, command.date, date);
@@ -471,8 +622,47 @@ export function applyCommand(
           state.arrangements[target],
           state.arrangements[source],
         ];
-        advanceTaskVersion(state, state.arrangements[source]);
-        advanceTaskVersion(state, state.arrangements[target]);
+        advanceArrangementVersion(state, state.arrangements[source]);
+        advanceArrangementVersion(state, state.arrangements[target]);
+      }
+      break;
+    }
+    case "moveTodayGroups": {
+      if (command.date !== date) throw new Error("只能调整当天的分组顺序。");
+      const source = new Set(command.taskIds);
+      const target = new Set(command.targetTaskIds);
+      const slots = state.arrangements.flatMap((item, index) =>
+        item.date === date &&
+        !item.done &&
+        (source.has(item.taskId) || target.has(item.taskId))
+          ? [index]
+          : [],
+      );
+      if (
+        slots.length !==
+        command.taskIds.length + command.targetTaskIds.length
+      )
+        throw new Error("今日安排已变化，请刷新后重试。");
+      const items = slots.map((index) => state.arrangements[index]);
+      const sourceItems = items.filter((item) => source.has(item.taskId));
+      const targetItems = items.filter((item) => target.has(item.taskId));
+      const sourceSlots = items.map((item) => source.has(item.taskId));
+      const firstSource = sourceSlots.indexOf(true);
+      const firstTarget = sourceSlots.indexOf(false);
+      // The first pending slot controls each group's position in the queue.
+      sourceSlots[firstSource] = false;
+      sourceSlots[firstTarget] = true;
+      let sourceIndex = 0;
+      let targetIndex = 0;
+      const reordered = sourceSlots.map((belongsToSource) =>
+        belongsToSource
+          ? sourceItems[sourceIndex++]
+          : targetItems[targetIndex++],
+      );
+      for (const [position, index] of slots.entries()) {
+        if (state.arrangements[index] !== reordered[position])
+          advanceArrangementVersion(state, reordered[position]);
+        state.arrangements[index] = reordered[position];
       }
       break;
     }
@@ -495,6 +685,7 @@ export function applyCommand(
       if (command.accept) {
         for (const change of changes) {
           checkChangeVersion(state, change);
+          checkCompletionScope(state, change, date);
           if (isRecurringChange(change))
             checkRecurringTarget(state, change, date);
           if (
@@ -512,10 +703,12 @@ export function applyCommand(
           applyRecurringChange(state, change, date, now);
           continue;
         }
+        const recurrences = effectiveRecurrences(state.tasks);
         if (
           (change.type !== "update" &&
-            findTask(state, change.taskId).recurrence) ||
-          (change.fromTaskId && findTask(state, change.fromTaskId).recurrence)
+            change.type !== "split" &&
+            recurrences.get(change.taskId)) ||
+          (change.fromTaskId && recurrences.get(change.fromTaskId))
         )
           throw new Error("请选择对应的重复任务操作。");
         if (change.type === "schedule") {
@@ -545,13 +738,20 @@ export function applyCommand(
         } else if (change.type === "update") {
           if (!change.patch) throw new Error("任务修改内容缺失。");
           const task = findTask(state, change.taskId);
-          if (task.recurrence) checkRecurringTaskPatch(change.patch);
+          if (recurrences.get(task.id)) checkRecurringTaskPatch(change.patch);
           saveTask(state, { ...task, ...change.patch }, date, now);
         } else if (change.type === "unschedule") {
           removeArrangement(state, change.taskId, change.date);
         } else if (change.type === "stage") {
           if (change.done === undefined) throw new Error("阶段完成状态缺失。");
-          setStage(state, change.taskId, change.date, change.done);
+          setStage(
+            state,
+            change.taskId,
+            change.date,
+            change.done,
+            date,
+            change.descendantIds ?? [],
+          );
         } else {
           const parent = findTask(state, change.taskId);
           for (const child of change.children) {
@@ -565,6 +765,7 @@ export function applyCommand(
             state.tasks.push(task);
           }
           parent.version++;
+          synchronizeRecurrence(state, date);
         }
       }
       // Sibling changes in this proposal stay applicable after an accepted part.

@@ -116,7 +116,13 @@ export const arrangementSchema = z.object({
   date: z.string(),
   scope: z.string().trim().min(1),
   done: z.boolean(),
-  recurrence: z.object({ title: taskSchema.shape.title }).optional(),
+  recurrence: z
+    .object({
+      title: taskSchema.shape.title,
+      ancestorIds: z.array(z.string()).optional(),
+    })
+    .optional(),
+  occurrenceVersion: z.number().int().nonnegative().optional(),
 });
 export type Arrangement = z.infer<typeof arrangementSchema>;
 const changeSchema = z.object({
@@ -133,6 +139,7 @@ const changeSchema = z.object({
     "stage",
     "updateRecurrence",
     "deleteRecurringTask",
+    "createOccurrence",
     "updateOccurrenceScope",
     "setOccurrenceDone",
     "skipOccurrence",
@@ -236,6 +243,11 @@ export const commandSchema = z.discriminatedUnion("type", [
     scope: z.string().trim().min(1),
   }),
   z.object({
+    type: z.literal("scheduleDueToday"),
+    taskId: z.string(),
+    date: recurrenceDate,
+  }),
+  z.object({
     type: z.literal("unschedule"),
     taskId: z.string(),
     date: z.string(),
@@ -245,6 +257,12 @@ export const commandSchema = z.discriminatedUnion("type", [
     taskId: z.string(),
     date: z.string(),
     done: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("createOccurrence"),
+    taskId: z.string(),
+    date: recurrenceDate,
+    scope: arrangementSchema.shape.scope,
   }),
   z.object({
     type: z.literal("skipOccurrence"),
@@ -267,6 +285,12 @@ export const commandSchema = z.discriminatedUnion("type", [
     taskId: z.string(),
     date: z.string(),
     targetTaskId: z.string(),
+  }),
+  z.object({
+    type: z.literal("moveTodayGroups"),
+    date: recurrenceDate,
+    taskIds: z.array(z.string()).nonempty(),
+    targetTaskIds: z.array(z.string()).nonempty(),
   }),
   z.object({ type: z.literal("proposal"), proposal: proposalSchema }),
   z.object({

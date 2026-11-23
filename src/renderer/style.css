@@ -595,6 +595,87 @@ nav button span {
   margin-left: auto;
   color: var(--muted);
 }
+.task-children {
+  margin: 8px 0 6px 26px;
+  padding: 0 0 0 10px;
+  border-inline-start: 1px solid var(--line);
+}
+.task-children-container > summary {
+  width: fit-content;
+  margin-inline-start: 26px;
+  padding: 4px 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.task-child-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding-inline-start: var(--task-indent);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+.task-child-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  justify-items: start;
+  overflow-wrap: anywhere;
+}
+.task-child-row.child-focused {
+  background: var(--energy);
+}
+.task-child-row.unscheduled-child {
+  padding-inline-start: calc(var(--task-indent) + 32px);
+}
+.child-actions-menu {
+  z-index: 9;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.child-actions-menu [role="menuitem"] {
+  padding: 5px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.child-actions-menu [data-highlighted] {
+  background: var(--soft);
+  outline: none;
+}
+.task-child-name {
+  background: transparent;
+  border: 0;
+  padding: 3px 0;
+  text-align: left;
+  color: var(--ink);
+}
+.task-child-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.child-check {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.today-due {
+  margin-block: 16px 14px;
+}
+.today-due li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line);
+}
 .next-step {
   color: var(--accent);
   padding: 8px 0 10px 26px;
@@ -796,6 +877,12 @@ nav button span {
   align-items: center;
   padding: 12px 4px;
   text-align: left;
+}
+.task-list-row.is-nested {
+  width: calc(100% - var(--task-indent));
+  margin-inline-start: var(--task-indent);
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--line);
 }
 .list-task-name {
   flex: 1;

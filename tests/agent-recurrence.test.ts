@@ -33,6 +33,120 @@ function withDailyTask() {
   ]);
 }
 
+test("Agent 补加非规则日的一次实例，修改和完成不写模板", () => {
+  const state = turn(emptyState(), [
+    {
+      type: "createTask",
+      mode: direct,
+      title: "拉伸",
+      patch: {},
+      recurrence: { type: "weekly", weekdays: [2] },
+    },
+  ]);
+  const task = state.tasks[0];
+  assert.deepEqual(state.arrangements, []);
+  const create = {
+    type: "createOccurrence",
+    mode: direct,
+    taskId: task.id,
+    date: today,
+    scope: "拉伸十分钟",
+  } as const;
+  const extra = turn(state, [create]);
+  assert.throws(() => turn(extra, [create]), /当天已有安排/);
+  const completed = turn(extra, [
+    {
+      type: "updateOccurrenceScope",
+      mode: direct,
+      taskId: task.id,
+      date: today,
+      scope: "只拉伸肩部",
+    },
+    {
+      type: "setOccurrenceDone",
+      mode: direct,
+      taskId: task.id,
+      date: today,
+      done: true,
+    },
+  ]);
+  assert.deepEqual(completed.tasks, state.tasks);
+  assert.equal(completed.arrangements[0].done, true);
+  assert.equal(completed.arrangements[0].scope, "只拉伸肩部");
+  const next = turn(completed, [], tomorrow);
+  assert.equal(next.arrangements[1].done, false);
+  assert.equal(next.arrangements[1].scope, "拉伸");
+});
+
+test("模板编辑不会使原实例方案过期，父项完成方案复核当天子任务范围", () => {
+  const original = withDailyTask();
+  const parent = original.tasks[0];
+  const suggested = turn(original, [
+    {
+      type: "updateOccurrenceScope",
+      mode: proposal,
+      taskId: parent.id,
+      date: today,
+      scope: "只做五分钟",
+    },
+  ]);
+  const renamed = applyCommand(
+    suggested,
+    { type: "saveTask", task: { ...parent, title: "新模板名" } },
+    today,
+  );
+  const plan = renamed.proposals.at(-1)!;
+  const applyPlan = {
+    type: "resolve",
+    mode: direct,
+    proposalId: plan.id,
+    ids: [plan.changes[0].id],
+    accept: true,
+  } as const;
+  const updated = turn(renamed, [{ ...applyPlan, ids: [...applyPlan.ids] }]);
+  assert.equal(updated.arrangements[0].scope, "只做五分钟");
+  assert.equal(updated.arrangements[0].recurrence?.title, "拉伸");
+  const doneProposal = turn(updated, [
+    {
+      type: "setOccurrenceDone",
+      mode: proposal,
+      taskId: parent.id,
+      date: today,
+      done: true,
+    },
+  ]);
+  const added = applyCommand(
+    doneProposal,
+    { type: "saveTask", task: { ...newTask(parent.id), title: "新增子项" } },
+    today,
+  );
+  const completion = added.proposals.at(-1)!;
+  assert.throws(
+    () =>
+      turn(added, [
+        {
+          ...applyPlan,
+          proposalId: completion.id,
+          ids: [completion.changes[0].id],
+        },
+      ]),
+    /子任务的今日完成范围已变化/,
+  );
+  const completed = turn(added, [
+    {
+      type: "setOccurrenceDone",
+      mode: direct,
+      taskId: parent.id,
+      date: today,
+      done: true,
+    },
+  ]);
+  assert.deepEqual(
+    completed.arrangements.map(({ done }) => done),
+    [true, true],
+  );
+});
+
 test("Agent 可创建每天、每周和含首尾的日期范围任务，同轮调整当次范围", () => {
   const state = turn(emptyState(), [
     {
@@ -130,7 +244,8 @@ test("现有普通任务首次设重复复用同日安排，改规则时今日�
       date: today,
       scope: "练第一段",
       done: true,
-      recurrence: { title: "练琴" },
+      recurrence: { title: "练琴", ancestorIds: [] },
+      occurrenceVersion: 1,
     },
   ]);
   assert.equal(weekly.tasks[0].status, "todo");
@@ -315,7 +430,29 @@ test("删除模板需要覆盖子任务的明确范围，新增后代使旧建�
   assert.equal(updated.tasks.length, 3);
   const deleted = turn(suggested, changes);
   assert.deepEqual(deleted.tasks, []);
-  assert.equal(deleted.arrangements.length, 1);
+  assert.deepEqual(
+    deleted.arrangements.map((item) => item.taskId),
+    [taskId, child.id],
+  );
+});
+
+test("Agent 拆分重复父任务时，子任务在本轮按同一规则生成实例", () => {
+  const original = withDailyTask();
+  const next = turn(original, [
+    {
+      type: "split",
+      mode: direct,
+      taskId: original.tasks[0].id,
+      children: [
+        { title: "热身", description: "" },
+        { title: "收尾", description: "" },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    next.arrangements.map((item) => item.recurrence?.title),
+    [original.tasks[0].title, "热身", "收尾"],
+  );
 });
 
 test("只接受模板删除时，当天实例建议仍待接受并可单独执行", () => {

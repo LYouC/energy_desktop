@@ -1,4 +1,53 @@
-import type { Arrangement, RecurrenceRule, State } from "./model";
+import type { Arrangement, RecurrenceRule, State, Task } from "./model";
+
+export function taskAncestorIds(tasks: ReadonlyMap<string, Task>, id: string) {
+  const ancestors: string[] = [];
+  const seen = new Set([id]);
+  let parent = tasks.get(id)?.parentId;
+  while (parent && !seen.has(parent)) {
+    ancestors.push(parent);
+    seen.add(parent);
+    parent = tasks.get(parent)?.parentId;
+  }
+  return ancestors;
+}
+
+export function arrangementAncestorIds(
+  tasks: ReadonlyMap<string, Task>,
+  item: Arrangement,
+) {
+  return item.recurrence?.ancestorIds ?? taskAncestorIds(tasks, item.taskId);
+}
+
+export function occurrenceSnapshot(
+  tasks: ReadonlyMap<string, Task>,
+  task: Task,
+) {
+  return { title: task.title, ancestorIds: taskAncestorIds(tasks, task.id) };
+}
+
+export function effectiveRecurrences(tasks: Task[]) {
+  type EffectiveRecurrence = { sourceId: string; rule: RecurrenceRule };
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const resolved = new Map<string, EffectiveRecurrence | undefined>();
+  const resolving = new Set<string>();
+  function resolve(id: string): EffectiveRecurrence | undefined {
+    if (resolved.has(id)) return resolved.get(id);
+    const task = byId.get(id);
+    if (!task || resolving.has(id)) return;
+    resolving.add(id);
+    const recurrence = task.recurrence
+      ? { sourceId: id, rule: task.recurrence }
+      : task.parentId
+        ? resolve(task.parentId)
+        : undefined;
+    resolving.delete(id);
+    resolved.set(id, recurrence);
+    return recurrence;
+  }
+  for (const task of tasks) resolve(task.id);
+  return resolved;
+}
 
 export function findOccurrence(
   state: State,
@@ -58,37 +107,47 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
   );
   const previouslySkipped = state.skippedOccurrences;
   let changed = false;
+  const tasks = new Map(state.tasks.map((task) => [task.id, task]));
   if (previouslySkipped?.some((item) => item.arrangement.date < date)) {
     state.skippedOccurrences = previouslySkipped.filter(
       (item) => item.arrangement.date >= date,
     );
     changed = true;
   }
+  const skipped =
+    state.skippedOccurrences?.map(({ arrangement }) => arrangement) ?? [];
+  for (const item of [...state.arrangements, ...skipped]) {
+    if (item.date === date && item.recurrence && !item.recurrence.ancestorIds) {
+      item.recurrence.ancestorIds = taskAncestorIds(tasks, item.taskId);
+      changed = true;
+    }
+  }
 
-  const templates = state.tasks.filter((task) => task.recurrence);
-  const templateIds = new Set(templates.map((task) => task.id));
+  const recurrences = effectiveRecurrences(state.tasks);
+  const templates = state.tasks.flatMap((task) => {
+    const rule = recurrences.get(task.id)?.rule;
+    return rule ? [{ task, rule }] : [];
+  });
   for (const id of cursors.keys()) {
-    if (!templateIds.has(id)) {
+    if (!recurrences.get(id)) {
       cursors.delete(id);
       changed = true;
     }
   }
 
-  const due = templates.filter((task) => {
+  const due = templates.filter(({ task, rule }) => {
     const cursor = cursors.get(task.id);
     if (!cursor) return true;
     if (cursor.through >= date) return false;
-    const rule = task.recurrence;
     return (
-      rule?.type !== "range" ||
-      (cursor.through < rule.end && date >= rule.start)
+      rule.type !== "range" || (cursor.through < rule.end && date >= rule.start)
     );
   });
 
   const scheduled = new Map<string, Map<string, Arrangement>>();
   if (due.length) {
-    const dueIds = new Set(due.map((task) => task.id));
-    for (const item of state.arrangements) {
+    const dueIds = new Set(due.map(({ task }) => task.id));
+    for (const item of [...state.arrangements, ...skipped]) {
       if (!dueIds.has(item.taskId)) continue;
       const taskDates = scheduled.get(item.taskId) ?? new Map();
       taskDates.set(item.date, item);
@@ -96,9 +155,7 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
     }
   }
 
-  for (const task of due) {
-    const rule = task.recurrence;
-    if (!rule) continue;
+  for (const { task, rule } of due) {
     const cursor = cursors.get(task.id);
     const start = cursor ? followingDate(cursor.through) : date;
     if (!start) continue;
@@ -108,7 +165,7 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
       occurrenceDate && occurrenceDate <= date;
     ) {
       const existing = taskDates?.get(occurrenceDate);
-      const snapshot = { title: task.title };
+      const snapshot = occurrenceSnapshot(tasks, task);
       if (existing) existing.recurrence ??= snapshot;
       else
         state.arrangements.push({

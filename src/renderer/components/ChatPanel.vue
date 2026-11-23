@@ -58,8 +58,9 @@ const emptyOptimization = ref(false);
 const checkingToday = ref(false);
 const hasPendingToday = computed(() => {
   const today = localDate();
+  const tasks = new Set(store.state.tasks.map((task) => task.id));
   return store.state.arrangements.some(
-    (item) => item.date === today && !item.done,
+    (item) => item.date === today && !item.done && tasks.has(item.taskId),
   );
 });
 const runError = ref("");
@@ -310,10 +311,11 @@ function changeSummary(change: Change) {
       const scope = children ? `同时删除 ${children} 项子任务。 ` : "";
       return `${scope}停止生成新实例，保留已生成的重复记录。`;
     }
+    case "createOccurrence":
     case "updateOccurrenceScope":
       return `${change.date} · ${change.scope}`;
     case "setOccurrenceDone":
-      return `${change.date} · ${change.done ? "完成这次" : "恢复为未完成"}`;
+      return `${change.date} · ${change.done ? "完成这次" : "恢复为未完成"}${completionDetails(change)}`;
     case "skipOccurrence":
       return `${change.date} · 移出当天安排`;
     case "restoreOccurrence":
@@ -325,7 +327,7 @@ function changeSummary(change: Change) {
     return change.children.map((child) => child.title).join(" → ");
   if (change.type === "unschedule") return `取消 ${change.date} 的安排`;
   if (change.type === "stage")
-    return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}`;
+    return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}${completionDetails(change)}`;
   const fields: Record<string, string> = {
     title: "名称",
     status: "状态",
@@ -341,6 +343,10 @@ function changeSummary(change: Change) {
         `${fields[key]}：${key === "status" ? statusLabels[value as keyof typeof statusLabels] : String(value || "清空")}`,
     )
     .join("；");
+}
+function completionDetails(change: Change) {
+  const count = change.descendantIds?.length ?? 0;
+  return change.done && count ? `，同时完成 ${count} 项已安排的子任务` : "";
 }
 async function refreshConfig() {
   try {

@@ -14,8 +14,16 @@ import {
   type Change,
   type Command,
 } from "../domain/model";
-import { applyCommand, checkRecurringTaskPatch } from "../domain/operations";
-import { findOccurrence, synchronizeRecurrence } from "../domain/recurrence";
+import {
+  applyCommand,
+  checkRecurringTaskPatch,
+  pendingStageDescendants,
+} from "../domain/operations";
+import {
+  effectiveRecurrences,
+  findOccurrence,
+  synchronizeRecurrence,
+} from "../domain/recurrence";
 
 const authorization = {
   mode: z
@@ -117,6 +125,17 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      type: z
+        .literal("createOccurrence")
+        .describe(
+          "为现存重复模板补加仅今天的一次实例；已有或已移除时改用对应单次操作。",
+        ),
+      ...occurrenceTarget,
+      scope: arrangementSchema.shape.scope,
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("updateOccurrenceScope"),
       ...occurrenceTarget,
       scope: arrangementSchema.shape.scope,
@@ -126,7 +145,9 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("setOccurrenceDone"),
       ...occurrenceTarget,
-      done: z.boolean(),
+      done: z
+        .boolean()
+        .describe("true 同时完成当天已安排的后代；false 只恢复所选实例。"),
     })
     .strict(),
   z
@@ -162,6 +183,7 @@ const recurringChangeLabels: Partial<
   updateRecurrence: "设置重复规则",
   deleteRecurringTask: "删除重复模板",
   updateOccurrenceScope: "修改今日范围",
+  createOccurrence: "补加今天这次",
   setOccurrenceDone: "记录今日完成状态",
   skipOccurrence: "移除今日重复实例",
   restoreOccurrence: "撤销今日移除",
@@ -276,16 +298,16 @@ export function applyAgentTurn(
       if (!target) throw new Error("替换安排的目标任务不存在。");
       task = target;
     }
+    const recurrences = effectiveRecurrences(state.tasks);
     if (
-      (sourceTask?.recurrence || task?.recurrence) &&
+      (recurrences.get(sourceId) || (task && recurrences.get(task.id))) &&
       (action.type === "schedule" ||
         action.type === "unschedule" ||
         action.type === "updateArrangement" ||
-        action.type === "stage" ||
-        action.type === "split")
+        action.type === "stage")
     )
       throw new Error("请选择对应的重复任务操作，今日实例使用单次操作。");
-    if (sourceTask?.recurrence && action.type === "updateTask")
+    if (recurrences.get(sourceId) && action.type === "updateTask")
       checkRecurringTaskPatch(action.patch);
     // 模型选择直接落地的拆分若与现有待接受条目完全相同，复用该条目执行，
     // 让真实子任务与接受记录同步，避免另建一份已接受记录而遗留原卡片。
@@ -317,7 +339,7 @@ export function applyAgentTurn(
         continue;
       }
     }
-    const title = task?.title ?? occurrence?.recurrence?.title;
+    const title = occurrence?.recurrence?.title ?? task?.title;
     let descendantIds: string[] | undefined;
     if (action.type === "deleteRecurringTask") {
       const descendants = taskSubtreeIds(state.tasks, [sourceId]);
@@ -326,6 +348,14 @@ export function applyAgentTurn(
       if (descendantIds.length && !action.includeChildren)
         throw new Error("删除模板也会删除其子任务，请核实删除范围。");
     }
+    if (
+      (action.type === "stage" || action.type === "setOccurrenceDone") &&
+      action.done &&
+      action.date === date
+    )
+      descendantIds = pendingStageDescendants(state, sourceId, date).map(
+        (item) => item.taskId,
+      );
     const label =
       recurringChangeLabels[action.type] ??
       (action.type === "split" ? "拆分" : "调整");
@@ -389,11 +419,13 @@ export function applyAgentTurn(
     }
   }
   // 先完成本轮事实和已授权操作，再给尚未接受的建议绑定最新任务版本。
+  const recurrences = effectiveRecurrences(state.tasks);
   for (const change of proposal.changes) {
     const task = state.tasks.find((item) => item.id === change.taskId);
     if (!task && !change.occurrence)
       throw new Error("建议所引用的任务已在本轮删除，请重新核对。");
-    if (task?.recurrence && change.patch) checkRecurringTaskPatch(change.patch);
+    if (recurrences.get(change.taskId) && change.patch)
+      checkRecurringTaskPatch(change.patch);
     change.taskVersion = task?.version ?? null;
     if (change.fromTaskId) {
       const source = state.tasks.find((item) => item.id === change.fromTaskId);

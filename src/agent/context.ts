@@ -1,11 +1,40 @@
-import { localDate, type State } from "../domain/model";
+import { localDate, type Change, type State, type Task } from "../domain/model";
+import { effectiveRecurrences } from "../domain/recurrence";
+
+export function tasksForAgent(
+  tasks: Task[],
+): (Task & { recurrenceSourceId?: string })[] {
+  const recurrences = effectiveRecurrences(tasks);
+  return tasks.map((task) => {
+    const recurrence = recurrences.get(task.id);
+    return recurrence && !task.recurrence
+      ? {
+          ...task,
+          recurrence: recurrence.rule,
+          recurrenceSourceId: recurrence.sourceId,
+        }
+      : task;
+  });
+}
+
+export function refersToCurrentTasks(
+  change: Change,
+  taskIds: ReadonlySet<string>,
+) {
+  return (
+    taskIds.has(change.taskId) &&
+    (!change.fromTaskId || taskIds.has(change.fromTaskId))
+  );
+}
 
 export function buildContext(state: State, sessionId: string, date?: string) {
   const now = new Date();
   const today = localDate(now);
   date ??= today;
-  const active = state.tasks.filter(
-    (task) => !["done", "abandoned"].includes(task.status),
+  const tasks = tasksForAgent(state.tasks);
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const active = tasks.filter(
+    (task) => task.recurrence || !["done", "abandoned"].includes(task.status),
   );
   const messages = state.messages.filter(
     (message) => message.sessionId === sessionId,
@@ -15,14 +44,19 @@ export function buildContext(state: State, sessionId: string, date?: string) {
     time: `${today} ${now.toTimeString().slice(0, 5)}`,
     energy: state.energy,
     preferences: state.preferences,
-    recentResults: state.tasks
-      .filter((task) => ["done", "abandoned"].includes(task.status))
+    recentResults: tasks
+      .filter(
+        (task) =>
+          !task.recurrence && ["done", "abandoned"].includes(task.status),
+      )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 10),
-    today: state.arrangements.filter((item) => item.date === date),
+    today: state.arrangements.filter(
+      (item) => item.date === date && taskIds.has(item.taskId),
+    ),
     skippedToday: (state.skippedOccurrences ?? [])
       .map(({ arrangement }) => arrangement)
-      .filter((arrangement) => arrangement.date === date),
+      .filter((item) => item.date === date && taskIds.has(item.taskId)),
     unfinishedTasks: active.map((task) => ({
       ...task,
       previousArrangements: state.arrangements.filter(
@@ -38,11 +72,15 @@ export function buildContext(state: State, sessionId: string, date?: string) {
       hasEarlierMessages: messages.length > 12,
     },
     recentMessages: messages.slice(-12),
-    pendingProposals: state.proposals.filter(
-      (proposal) =>
-        proposal.sessionId === sessionId &&
-        proposal.changes.some((change) => change.status === "pending"),
-    ),
+    pendingProposals: state.proposals.flatMap((proposal) => {
+      if (proposal.sessionId !== sessionId) return [];
+      const changes = proposal.changes.filter((change) =>
+        refersToCurrentTasks(change, taskIds),
+      );
+      return changes.some((change) => change.status === "pending")
+        ? [{ ...proposal, changes }]
+        : [];
+    }),
   };
 }
 

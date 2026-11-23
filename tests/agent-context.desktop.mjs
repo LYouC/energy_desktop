@@ -112,11 +112,25 @@ try {
         updatedAt: now.toISOString(),
       },
     });
-    await window.desktop.execute(state.revision, {
+    const scheduled = await window.desktop.execute(state.revision, {
       type: "schedule",
       taskId: "report",
       date: now.toLocaleDateString("sv-SE"),
       scope: "写完报告初稿",
+    });
+    const recurring = await window.desktop.execute(scheduled.revision, {
+      type: "saveTask",
+      task: {
+        ...state.tasks[0],
+        id: "archived",
+        version: 0,
+        title: "已删除的重复模板",
+        recurrence: { type: "daily" },
+      },
+    });
+    await window.desktop.execute(recurring.revision, {
+      type: "deleteTask",
+      id: "archived",
     });
   });
   await page.reload();
@@ -131,12 +145,17 @@ try {
   expect(optimized.messages).toHaveLength(2);
   expect(optimized.sessions[0].draft).toBe("保留没写完的草稿");
   expect(optimized.arrangements[0].scope).toBe("写完报告初稿");
+  expect(
+    optimized.arrangements.some((item) => item.taskId === "archived"),
+  ).toBe(true);
   expect(optimized.proposals[0].changes[0]).toMatchObject({
     scope: "只写提纲",
     status: "pending",
   });
   const firstRequests = await capturedBodies();
   expect(firstRequests).toHaveLength(3);
+  for (const request of firstRequests)
+    expect(JSON.stringify(request.messages)).not.toContain("已删除的重复模板");
   expect(JSON.stringify(firstRequests[1].messages)).toContain(
     "一键优化只允许提出待用户接受的方案",
   );

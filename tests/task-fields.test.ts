@@ -5,10 +5,155 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { emptyState, newTask } from "../src/domain/model";
-import { applyCommand } from "../src/domain/operations";
+import { applyCommand, unscheduledTasksDue } from "../src/domain/operations";
 import { WorkspaceDatabase } from "../src/persistence/storage";
 import { buildContext } from "../src/agent/context";
 import { agentTurnSchema, applyAgentTurn } from "../src/agent/turn";
+
+test("移动今日任务组时保持各组内部的安排顺序", () => {
+  const date = "2026-11-23";
+  const parent = { ...newTask(), title: "父任务" };
+  const child = { ...newTask(parent.id), title: "子任务" };
+  const other = { ...newTask(), title: "独立任务" };
+  let state = emptyState();
+  for (const task of [parent, child, other])
+    state = applyCommand(state, { type: "saveTask", task }, date);
+  for (const task of [parent, child, other])
+    state = applyCommand(
+      state,
+      { type: "schedule", taskId: task.id, date, scope: task.title },
+      date,
+    );
+  const command = {
+    type: "moveTodayGroups" as const,
+    date,
+    taskIds: [parent.id, child.id],
+    targetTaskIds: [other.id],
+  };
+  const movedDown = applyCommand(state, command, date);
+  assert.deepEqual(
+    movedDown.arrangements.map(({ taskId }) => taskId),
+    [other.id, parent.id, child.id],
+  );
+  const movedBack = applyCommand(movedDown, command, date);
+  assert.equal(movedBack.arrangements[0].taskId, parent.id);
+  assert.deepEqual(
+    movedBack.arrangements
+      .filter(({ taskId }) => taskId !== other.id)
+      .map(({ taskId }) => taskId),
+    [parent.id, child.id],
+  );
+  const childDone = applyCommand(
+    state,
+    { type: "stage", taskId: child.id, date, done: true },
+    date,
+  );
+  assert.throws(() => applyCommand(childDone, command, date), /安排已变化/);
+  assert.equal(childDone.arrangements[1].done, true);
+});
+
+test("两组交错时只交换相邻组，第三组不被越过", () => {
+  const date = "2026-11-23";
+  const source = { ...newTask(), title: "源" };
+  const target = { ...newTask(), title: "目标" };
+  const third = { ...newTask(), title: "第三组" };
+  const sourceChild = { ...newTask(source.id), title: "源组子任务" };
+  const targetChild = { ...newTask(target.id), title: "目标组子任务" };
+  let state = emptyState();
+  for (const task of [source, target, third, targetChild, sourceChild]) {
+    state = applyCommand(state, { type: "saveTask", task }, date);
+    state = applyCommand(
+      state,
+      { type: "schedule", taskId: task.id, date, scope: task.title },
+      date,
+    );
+  }
+  const reordered = applyCommand(
+    state,
+    {
+      type: "moveTodayGroups",
+      date,
+      taskIds: [source.id, sourceChild.id],
+      targetTaskIds: [target.id, targetChild.id],
+    },
+    date,
+  );
+  assert.deepEqual(
+    reordered.arrangements.map(({ taskId }) => taskId),
+    [target.id, source.id, third.id, targetChild.id, sourceChild.id],
+  );
+});
+
+test("预计完成入口以提交时的日期和计划为准，重复点击不覆盖已有进展", () => {
+  const today = "2026-11-23";
+  const tomorrow = "2026-11-24";
+  const task = { ...newTask(), title: "吃牛奶", expectedDate: today };
+  const due = applyCommand(emptyState(), { type: "saveTask", task }, today);
+  assert.deepEqual(
+    unscheduledTasksDue(due, today).map(({ id }) => id),
+    [task.id],
+  );
+  const command = {
+    type: "scheduleDueToday" as const,
+    taskId: task.id,
+    date: today,
+  };
+  assert.deepEqual(applyCommand(due, command, tomorrow).arrangements, []);
+  const rescheduled = applyCommand(
+    due,
+    { type: "saveTask", task: { ...due.tasks[0], expectedDate: tomorrow } },
+    today,
+  );
+  assert.deepEqual(applyCommand(rescheduled, command, today).arrangements, []);
+  const arranged = applyCommand(
+    due,
+    { type: "schedule", taskId: task.id, date: today, scope: "已确认的范围" },
+    today,
+  );
+  const done = applyCommand(
+    arranged,
+    { type: "stage", taskId: task.id, date: today, done: true },
+    today,
+  );
+  assert.deepEqual(
+    applyCommand(done, command, today).arrangements,
+    done.arrangements,
+  );
+});
+
+test("仍有当天移除记录的子任务不会从预计完成入口重复安排", () => {
+  const date = "2026-11-23";
+  const parent = {
+    ...newTask(),
+    title: "每日计划",
+    recurrence: { type: "daily" as const },
+  };
+  const task = { ...newTask(parent.id), title: "复习", expectedDate: date };
+  let state = applyCommand(
+    emptyState(),
+    { type: "saveTask", task: parent },
+    date,
+  );
+  state = applyCommand(state, { type: "saveTask", task }, date);
+  state = applyCommand(
+    state,
+    { type: "skipOccurrence", taskId: task.id, date },
+    date,
+  );
+  state = applyCommand(
+    state,
+    { type: "saveTask", task: { ...state.tasks[1], parentId: null } },
+    date,
+  );
+  assert.deepEqual(unscheduledTasksDue(state, date), []);
+  const next = applyCommand(
+    state,
+    { type: "scheduleDueToday", taskId: task.id, date },
+    date,
+  );
+  assert.deepEqual(next.arrangements, state.arrangements);
+  assert.deepEqual(next.skippedOccurrences, state.skippedOccurrences);
+});
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {
   let state = applyCommand(emptyState(), {

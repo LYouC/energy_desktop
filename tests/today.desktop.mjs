@@ -46,6 +46,17 @@ try {
       await apply({ type: "schedule", taskId: id, date, scope });
       if (done) await apply({ type: "stage", taskId: id, date, done });
     }
+    const task = state.tasks.find(({ id }) => id === "blog");
+    await apply({
+      type: "saveTask",
+      task: {
+        ...task,
+        id: "due",
+        title: "预计完成提醒",
+        version: 0,
+        expectedDate: date,
+      },
+    });
   });
   await page.reload();
   const focus = page.locator(".task-card.focused");
@@ -55,6 +66,21 @@ try {
     /focused/,
   );
   await expect(focus).toContainText("写博客");
+  const due = page.getByRole("region", { name: "预计今天完成" });
+  await expect(due).toBeVisible();
+  expect((await focus.boundingBox()).y).toBeLessThan(
+    (await due.boundingBox()).y,
+  );
+  await expect(
+    focus.getByRole("button", { name: "完成今日阶段", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "管理", exact: true }).click();
+  const select = page.getByRole("button", { name: "选择今日安排：写博客" });
+  await expect(page.locator(".today-plan > :first-child")).toHaveText(/写博客/);
+  await expect(select.locator(".select-box")).toBeVisible();
+  await select.press("Space");
+  await expect(select).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "完成", exact: true }).click();
   await expect(completed.locator("summary")).toHaveText(
     "已完成的今日阶段 1 项",
   );

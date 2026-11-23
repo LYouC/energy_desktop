@@ -7,7 +7,70 @@ import { WorkspaceDatabase } from "../src/persistence/storage";
 import { emptyState } from "../src/domain/model";
 import { applyAgentTurn } from "../src/agent/turn";
 
-test("SDK 预演返回重复规则、已删除模板与保留的今天实例", async (context) => {
+test("SDK 可由模板补加当天实例，终答收到单次范围和完成结果", async () => {
+  const state = emptyState();
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      calls++;
+      if (calls === 1)
+        return response([
+          {
+            name: "prepareTurn",
+            input: {
+              intent: "changes",
+              actions: [
+                {
+                  type: "createTask",
+                  mode: "direct",
+                  ref: "stretch",
+                  title: "拉伸",
+                  patch: {},
+                  recurrence: { type: "weekly", weekdays: [2] },
+                },
+                {
+                  type: "createOccurrence",
+                  mode: "direct",
+                  taskId: "stretch",
+                  date: "2026-11-23",
+                  scope: "只拉伸肩部",
+                },
+                {
+                  type: "setOccurrenceDone",
+                  mode: "direct",
+                  taskId: "stretch",
+                  date: "2026-11-23",
+                  done: true,
+                },
+              ],
+            },
+          },
+        ]);
+      const receipt = JSON.stringify(
+        options.prompt.filter(({ role }) => role === "tool"),
+      );
+      assert.match(receipt, /只拉伸肩部/);
+      assert.match(receipt, /"done":true/);
+      assert.match(receipt, /"weekdays":\[2\]/);
+      return response([], "已记下今天这次拉伸并完成。");
+    },
+  });
+  const result = await generateAgentTurn({
+    state,
+    sessionId: state.activeSessionId,
+    focusedId: null,
+    userText: "设置每周二拉伸，今天单加肩部拉伸并记完成",
+    connection,
+    model,
+    date: "2026-11-23",
+    signal: AbortSignal.timeout(10000),
+    emit: () => {},
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.turn.actions.length, 3);
+});
+
+test("SDK 仅在删除回执中说明已删模板，后续规划和读取不发送旧实例", async (context) => {
   const date = "2026-11-23";
   const db = new WorkspaceDatabase(":memory:", () => date);
   context.after(() => db.close());
@@ -47,19 +110,30 @@ test("SDK 预演返回重复规则、已删除模板与保留的今天实例", a
           ]);
         case 4:
           assert.match(receipt, /"deletedTasks":\["拉伸"\]/);
-          assert.match(receipt, /"taskTitle":"拉伸"/);
-          return response([], "已删除模板，今天这次仍在。");
-        case 5:
+          assert.match(receipt, /"arrangements":\[\]/);
+          return response([], "已删除模板，执行记录仍在工作台。");
+        case 5: {
+          const workspace = options.prompt.find((item) => item.role === "user");
+          const text = workspace?.content.find(
+            (part) => part.type === "text",
+          )?.text;
+          const data = JSON.parse(text!.split("\n")[1]).context;
+          assert.deepEqual(data.today, []);
+          assert.deepEqual(data.skippedToday, []);
+          assert.equal(data.focusedId, null);
           return response([{ name: "readTask", input: { taskId } }]);
+        }
         case 6:
           assert.match(receipt, /"task":null/);
-          assert.match(receipt, /"title":"拉伸"/);
+          assert.match(receipt, /"arrangements":\[\]/);
+          assert.doesNotMatch(receipt, /拉伸/);
           return prepare([
-            { type: "skipOccurrence", mode: "direct", taskId, date },
+            // A different task can still be created without echoing the archived instance.
+            { type: "createTask", mode: "direct", title: "晨读", patch: {} },
           ]);
         default:
-          assert.match(receipt, /"skippedToday":\[\{/);
-          return response([], "已移出今天的拉伸。");
+          assert.doesNotMatch(receipt, /拉伸/);
+          return response([], "已创建晨读。");
       }
     },
   });
@@ -74,7 +148,7 @@ test("SDK 预演返回重复规则、已删除模板与保留的今天实例", a
         runId: crypto.randomUUID(),
         sessionId: db.load().activeSessionId,
         text,
-        focusedId: null,
+        focusedId: taskId ?? null,
       },
       () => {},
     );
@@ -83,9 +157,9 @@ test("SDK 预演返回重复规则、已删除模板与保留的今天实例", a
   const deleted = await send("删除拉伸模板");
   assert.deepEqual(deleted.tasks, []);
   assert.equal(deleted.arrangements[0].taskId, taskId);
-  const skipped = await send("把留下的今天这次拉伸移出安排");
-  assert.deepEqual(skipped.arrangements, []);
-  assert.equal(skipped.skippedOccurrences?.[0].arrangement.taskId, taskId);
+  const next = await send("记下晨读");
+  assert.equal(next.tasks[0].title, "晨读");
+  assert.deepEqual(next.arrangements, deleted.arrangements);
   assert.equal(calls, 7);
 });
 

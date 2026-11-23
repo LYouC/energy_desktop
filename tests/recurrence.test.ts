@@ -9,6 +9,102 @@ import {
 
 const monday = "2026-11-23";
 
+test("主任务完成覆盖当天仍有安排的后代，恢复父项保留子项结果", () => {
+  const parent = {
+    ...newTask(),
+    title: "日常",
+    recurrence: { type: "daily" as const },
+  };
+  const child = { ...newTask(parent.id), title: "读书" };
+  const grandchild = { ...newTask(child.id), title: "摘录" };
+  const skipped = { ...newTask(parent.id), title: "运动" };
+  let state = emptyState();
+  for (const task of [parent, child, grandchild, skipped])
+    state = applyCommand(state, { type: "saveTask", task }, monday);
+  state = applyCommand(
+    state,
+    { type: "skipOccurrence", taskId: skipped.id, date: monday },
+    monday,
+  );
+  const templates = state.tasks;
+  state = applyCommand(
+    state,
+    { type: "stage", taskId: parent.id, date: monday, done: true },
+    monday,
+  );
+  assert.deepEqual(
+    state.arrangements.map(({ done }) => done),
+    [true, true, true],
+  );
+  assert.equal(state.skippedOccurrences?.[0].arrangement.done, false);
+  assert.deepEqual(state.tasks, templates);
+  state = applyCommand(
+    state,
+    { type: "stage", taskId: parent.id, date: monday, done: false },
+    monday,
+  );
+  assert.deepEqual(
+    state.arrangements.map(({ done }) => done),
+    [false, true, true],
+  );
+  synchronizeRecurrence(state, "2026-11-24");
+  assert.deepEqual(
+    state.arrangements
+      .filter(({ date }) => date === "2026-11-24")
+      .map(({ done }) => done),
+    [false, false, false, false],
+  );
+});
+
+test("旧数据在模板重挂之前补齐当天快照，次日才按新归属生成", () => {
+  const first = {
+    ...newTask(),
+    title: "旧父任务",
+    recurrence: { type: "daily" as const },
+  };
+  const second = {
+    ...newTask(),
+    title: "新父任务",
+    recurrence: { type: "daily" as const },
+  };
+  const child = { ...newTask(first.id), title: "原名称" };
+  let state = emptyState();
+  for (const task of [first, second, child])
+    state = applyCommand(state, { type: "saveTask", task }, monday);
+  const instance = state.arrangements.find((item) => item.taskId === child.id)!;
+  instance.recurrence = { title: "原名称" };
+  state = applyCommand(
+    state,
+    {
+      type: "saveTask",
+      task: { ...state.tasks[2], parentId: second.id, title: "新名称" },
+    },
+    monday,
+  );
+  const snapshot = state.arrangements.find((item) => item.taskId === child.id)!;
+  assert.deepEqual(snapshot.recurrence, {
+    title: "原名称",
+    ancestorIds: [first.id],
+  });
+  state = applyCommand(
+    state,
+    { type: "stage", taskId: first.id, date: monday, done: true },
+    monday,
+  );
+  assert.equal(
+    state.arrangements.find((item) => item.taskId === child.id)?.done,
+    true,
+  );
+  const tomorrow = "2026-11-24";
+  synchronizeRecurrence(state, tomorrow);
+  assert.deepEqual(
+    state.arrangements.find(
+      (item) => item.taskId === child.id && item.date === tomorrow,
+    )?.recurrence,
+    { title: "新名称", ancestorIds: [second.id] },
+  );
+});
+
 test("新建每日模板时，今天实例排在已有安排后并独立完成", () => {
   const ordinary = { ...newTask(), title: "整理会议纪要" };
   const english = {
@@ -30,7 +126,10 @@ test("新建每日模板时，今天实例排在已有安排后并独立完成",
     state.arrangements.map((item) => item.taskId),
     [ordinary.id, english.id],
   );
-  assert.deepEqual(state.arrangements[1].recurrence, { title: "练英语" });
+  assert.deepEqual(state.arrangements[1].recurrence, {
+    title: "练英语",
+    ancestorIds: [],
+  });
   state = applyCommand(
     state,
     { type: "stage", taskId: english.id, date: monday, done: true },
@@ -38,6 +137,7 @@ test("新建每日模板时，今天实例排在已有安排后并独立完成",
   );
   assert.equal(state.arrangements[1].done, true);
   assert.equal(state.tasks[1].status, "todo");
+  assert.equal(state.tasks[1].version, 1);
 });
 
 test("每周后续未打开仍按星期补齐；已有安排原地保留完成情况和范围", () => {
@@ -153,7 +253,7 @@ test("指定日期含首尾，编辑过期规则从次日执行，旧实例快�
   assert.deepEqual(state.arrangements.at(-1), {
     taskId: task.id,
     date: "2026-12-03",
-    recurrence: { title: "快走" },
+    recurrence: { title: "快走", ancestorIds: [] },
     scope: "快走",
     done: false,
   });
@@ -178,7 +278,9 @@ test("从今天移除会在当天保存选择，批量撤销能恢复原位置�
     },
     monday,
   );
-  const before = state.arrangements;
+  const visibleArrangements = (items: typeof state.arrangements) =>
+    items.map(({ occurrenceVersion, ...item }) => item);
+  const before = visibleArrangements(state.arrangements);
   for (const task of tasks.slice(0, 2)) {
     state = applyCommand(
       state,
@@ -199,7 +301,7 @@ test("从今天移除会在当天保存选择，批量撤销能恢复原位置�
       monday,
     );
   }
-  assert.deepEqual(state.arrangements, before);
+  assert.deepEqual(visibleArrangements(state.arrangements), before);
 
   const reverse = state.tasks.slice(0, 2).reverse();
   for (const task of reverse) {
@@ -216,7 +318,7 @@ test("从今天移除会在当天保存选择，批量撤销能恢复原位置�
       monday,
     );
   }
-  assert.deepEqual(state.arrangements, before);
+  assert.deepEqual(visibleArrangements(state.arrangements), before);
 
   state = applyCommand(
     state,
@@ -373,7 +475,8 @@ test("删除父任务停止重复子任务，历史和今天已生成的实例�
   assert.deepEqual(state.arrangements.at(-1), {
     taskId: child.id,
     date: today,
-    recurrence: { title: "练英语" },
+    recurrence: { title: "练英语", ancestorIds: [parent.id] },
+    occurrenceVersion: 5,
     scope: "跟读五分钟",
     done: true,
   });

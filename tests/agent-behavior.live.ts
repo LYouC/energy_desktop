@@ -444,14 +444,14 @@ const deleted = applyCommand(
   today,
 );
 await run(
-  "B09e 完成已删除模板的当天实例",
+  "B09e 已删除模板不作为当前计划",
   deleted,
   "今天那次拉伸我已经做完了，帮我标记一下。",
-  ["从当天记录定位已删除模板的实例，准确说明只完成本次。"],
+  ["说明当前计划没有该任务，可以从工作台查看或处理已保留的执行记录。"],
   (_before, next) => {
     assert.deepEqual(next.tasks, []);
     assert.equal(next.arrangements.length, 1);
-    assert.equal(next.arrangements[0].done, true);
+    assert.equal(next.arrangements[0].done, false);
   },
 );
 const clockCheckStarted = Date.now();

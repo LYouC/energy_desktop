@@ -1,9 +1,12 @@
 import {
   localDate,
+  statusLabels,
   taskSubtreeIds,
+  type Arrangement,
   type RecurrenceRule,
   type Task,
 } from "../../domain/model";
+import { effectiveRecurrences } from "../../domain/recurrence";
 
 export const weekdays = [
   [1, "周一"],
@@ -32,5 +35,22 @@ export function recurrenceLabel(rule: RecurrenceRule) {
 
 export function affectedRecurringTasks(tasks: Task[], ids: string[]) {
   const affected = taskSubtreeIds(tasks, ids);
-  return tasks.filter((task) => task.recurrence && affected.has(task.id));
+  const recurrences = effectiveRecurrences(tasks);
+  return tasks.filter(
+    (task) => recurrences.get(task.id) && affected.has(task.id),
+  );
+}
+
+export function taskProgressForDate(
+  task: Task,
+  arrangement: Arrangement | undefined,
+  repeats: boolean,
+) {
+  if (arrangement)
+    return {
+      done: arrangement.done,
+      label: arrangement.done ? "今日阶段已完成" : "今日待推进",
+    };
+  if (repeats) return { done: false, label: "今天未安排" };
+  return { done: task.status === "done", label: statusLabels[task.status] };
 }

@@ -19,7 +19,7 @@ const historyItems = computed(() => {
   }
   const active = new Map(
     store.state.tasks
-      .filter((task) => task.recurrence)
+      .filter((task) => store.recurrences.get(task.id))
       .map((task) => [task.id, task]),
   );
   for (const id of active.keys()) {

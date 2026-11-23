@@ -47,7 +47,7 @@ async function save() {
       <p v-if="error" role="alert" class="error">{{ error }}</p>
       <div class="form-actions repeat-form-actions">
         <Button
-          v-if="task?.recurrence"
+          v-if="task && store.recurrences.get(task.id)"
           type="button"
           variant="ghost"
           @click="emit('settings', task)"

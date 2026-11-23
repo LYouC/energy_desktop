@@ -96,7 +96,7 @@ try {
     await page.screenshot({ path: `test-results/review-${theme}-list.png` });
     await page.getByRole("button", { name: /今日安排/ }).click();
   }
-  await page.locator(".child-row").click();
+  await page.locator(".task-child-name").click();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   for (const theme of ["light", "dark"]) {
     await settings(theme);

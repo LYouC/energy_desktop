@@ -23,7 +23,7 @@
 
 每轮构建上下文时读取操作系统本地时间，将 `YYYY-MM-DD HH:mm` 写入 `context.time` 和系统指令。Agent 直接使用本轮时间回答当前日期和钟点，安排使用工作区日期及 `calendar` 锚点。离线 SDK 测试核对决策和终答都收到同一时间，B10 校验真实模型的回复。
 
-上下文的 `today` 和 `skippedToday` 分别列出今日安排与当天已移除的重复实例。`readTask` 可用实例保存的 taskId 核对这两处记录，包括模板已删除的实例。往日重复执行记录在工作台的「重复记录」中。
+上下文的 `today` 和 `skippedToday` 分别列出现存任务的今日安排与当天已移除的重复实例。任务查询、聚焦项、待接受变更和预演回执按现存任务过滤。已删除模板的执行记录保留在工作台，历史对话继续按原文传递。子任务的 `recurrence` 表示有效规则，`recurrenceSourceId` 表示该规则来自哪个祖先。
 
 每轮由模型调用 `prepareTurn({intent,actions,memory?})` 明确语义决定。纯交流选择 conversation 与空 actions，实际操作或正式方案选择 changes 与具体动作，每项 mode 单独表达是否已授权。程序在内存预演并返回回执，SDK 下一步关闭工具并生成自然语言终答。每次生成共用一套最多六步的工具循环。运行层对可重试的服务或网络故障最多退避重试三次，共享两分钟总时限；取消立即终止等待，业务校验和鉴权失败不会自动重试。
 
@@ -44,9 +44,9 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 
 `prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝方案条目。
 
-重复任务在 `createTask` 动作顶层填写 `recurrence`。已存在任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除模板。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效。模板删除会同时删除后代任务，并保留已生成的重复实例。存在子任务时需明确指定 `includeChildren`。
+重复任务在 `createTask` 动作顶层填写 `recurrence`。已有任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除重复任务。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效，拆分重复父任务生成的子任务跟随父规则。删除同时删除后代任务并保留已生成的本地实例。存在子任务时需明确指定 `includeChildren`。
 
-当天的单次动作是 `updateOccurrenceScope`、`setOccurrenceDone`、`skipOccurrence`、`restoreOccurrence`。均使用实例的 taskId 和本地日期。规则和实例的待接受条目使用同一方案流程，版本、日期或相关实例快照变化时需重新核对。回执返回规则、今日结果、移除记录、删除模板和待接受条目。
+当天可用 `createOccurrence` 补加规则外的一次执行，使用 `updateOccurrenceScope`、`setOccurrenceDone`、`skipOccurrence`、`restoreOccurrence` 操作已有实例。均使用 taskId 和本地日期。同一日期已有安排或移除记录时使用相应操作。现存实例的方案核对实例版本和快照；改模板标题或规则本身不使实例方案过期。完成父项时核对方案原先列出的当日子项范围。回执返回规则、今日结果、移除记录、删除模板和待接受条目。
 
 `turn.ts` 定义这些动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。新增计划建议保存为待接受方案，已授权操作直接执行。
 

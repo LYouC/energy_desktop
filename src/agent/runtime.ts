@@ -9,7 +9,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import { agentTurnSchema, applyAgentTurn, type AgentTurn } from "./turn";
-import { buildContext, readConversation } from "./context";
+import {
+  buildContext,
+  readConversation,
+  refersToCurrentTasks,
+  tasksForAgent,
+} from "./context";
 import { localDate, type Command, type State } from "../domain/model";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "./capacity";
@@ -130,8 +135,11 @@ export async function generateAgentTurn(options: {
   const context = {
     ...buildContext(state, sessionId, options.date),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    focusedId: options.focusedId,
+    focusedId: state.tasks.some((task) => task.id === options.focusedId)
+      ? options.focusedId
+      : null,
   };
+  const contextTasks = tasksForAgent(state.tasks);
   const today = new Date(context.date + "T12:00:00");
   const dateAt = (offset: number) => {
     const value = new Date(today);
@@ -185,17 +193,22 @@ export async function generateAgentTurn(options: {
           context.date,
         );
         const oldTasks = new Map(state.tasks.map((task) => [task.id, task]));
-        const changedTasks = next.tasks.filter(
+        const updatedTasks = tasksForAgent(next.tasks);
+        const changedTasks = updatedTasks.filter(
           (task) => oldTasks.get(task.id)?.version !== task.version,
         );
-        const nextTasks = new Map(next.tasks.map((task) => [task.id, task]));
+        const nextTasks = new Map(updatedTasks.map((task) => [task.id, task]));
+        const nextTaskIds = new Set(nextTasks.keys());
         const withTaskTitle = ({
           taskId,
           ...arrangement
         }: State["arrangements"][number]) => ({
           ...arrangement,
+          recurrence: arrangement.recurrence
+            ? { title: arrangement.recurrence.title }
+            : undefined,
           taskTitle:
-            nextTasks.get(taskId)?.title ?? arrangement.recurrence?.title,
+            arrangement.recurrence?.title ?? nextTasks.get(taskId)?.title,
         });
         prepared = actions;
         memory = next.sessions.find(
@@ -233,10 +246,18 @@ export async function generateAgentTurn(options: {
             .filter((task) => !nextTasks.has(task.id))
             .map(({ title }) => title),
           arrangements: next.arrangements
-            .filter((item) => !item.recurrence || item.date === context.date)
+            .filter(
+              (item) =>
+                nextTasks.has(item.taskId) &&
+                (!item.recurrence || item.date === context.date),
+            )
             .map(withTaskTitle),
           skippedToday: (next.skippedOccurrences ?? [])
-            .filter(({ arrangement }) => arrangement.date === context.date)
+            .filter(
+              ({ arrangement }) =>
+                arrangement.date === context.date &&
+                nextTasks.has(arrangement.taskId),
+            )
             .map(({ arrangement }) => withTaskTitle(arrangement)),
           resolvedChanges: actions.flatMap((action) => {
             if (action.type !== "resolve") return [];
@@ -251,15 +272,32 @@ export async function generateAgentTurn(options: {
             .filter((proposal) => proposal.sessionId === sessionId)
             .flatMap((proposal) =>
               proposal.changes
-                .filter((change) => change.status === "pending")
-                .map(({ label, type, scope, date, recurrence, done }) => ({
-                  label,
-                  type,
-                  scope,
-                  date,
-                  recurrence,
-                  done,
-                })),
+                .filter(
+                  (change) =>
+                    change.status === "pending" &&
+                    refersToCurrentTasks(change, nextTaskIds),
+                )
+                .map(
+                  ({
+                    label,
+                    type,
+                    scope,
+                    date,
+                    recurrence,
+                    done,
+                    descendantIds,
+                  }) => ({
+                    label,
+                    type,
+                    scope,
+                    date,
+                    recurrence,
+                    done,
+                    completionDescendantCount: done
+                      ? descendantIds?.length
+                      : undefined,
+                  }),
+                ),
             ),
         };
       } catch (error) {
@@ -325,18 +363,21 @@ export async function generateAgentTurn(options: {
       }),
       readTask: tool({
         description:
-          "按任务ID查看属性、子任务、普通安排与当天重复实例，包括已从今天移除的实例。已删除的模板返回 task:null，仍可通过 ID 查其当天实例。更新说明前核实旧内容。",
+          "按任务ID查看现存任务的属性、子任务、普通安排与当天重复实例，包括已从今天移除的实例。已删除的任务返回 task:null。更新说明前核实旧内容。",
         inputSchema: z.object({ taskId: z.string() }),
         execute: async ({ taskId }) => {
           emit({ type: "status", text: "正在查看相关任务背景…" });
+          const task = contextTasks.find((item) => item.id === taskId) ?? null;
           return {
-            task: state.tasks.find((t) => t.id === taskId) ?? null,
-            children: state.tasks.filter((t) => t.parentId === taskId),
-            arrangements: state.arrangements.filter(
-              (item) =>
-                item.taskId === taskId &&
-                (!item.recurrence || item.date === context.date),
-            ),
+            task,
+            children: contextTasks.filter((t) => t.parentId === taskId),
+            arrangements: task
+              ? state.arrangements.filter(
+                  (item) =>
+                    item.taskId === taskId &&
+                    (!item.recurrence || item.date === context.date),
+                )
+              : [],
             skippedToday: context.skippedToday.filter(
               (item) => item.taskId === taskId,
             ),

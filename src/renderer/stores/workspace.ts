@@ -1,9 +1,11 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { emptyState, type Command, type State } from "../../domain/model";
+import { effectiveRecurrences } from "../../domain/recurrence";
 
 export const useWorkspace = defineStore("workspace", () => {
   const state = ref<State>(emptyState());
+  const recurrences = computed(() => effectiveRecurrences(state.value.tasks));
   const ready = ref(false);
   const error = ref("");
   let queue: Promise<unknown> = Promise.resolve();
@@ -42,5 +44,5 @@ export const useWorkspace = defineStore("workspace", () => {
     queue = work.catch(() => {});
     return work;
   }
-  return { state, ready, error, load, dispatch };
+  return { state, recurrences, ready, error, load, dispatch };
 });

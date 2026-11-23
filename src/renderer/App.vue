@@ -1,5 +1,12 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+  ref,
+  watch,
+} from "vue";
 import {
   Sun,
   ListTodo,
@@ -25,13 +32,18 @@ import OccurrenceEditor from "./components/OccurrenceEditor.vue";
 import RecurrenceHistory from "./components/RecurrenceHistory.vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import WindowTitleBar from "./components/WindowTitleBar.vue";
+import { taskGroups, taskGroupRows } from "./lib/taskGroups";
 import { deletionOrder, useTaskSelection } from "./composables/taskSelection";
 import {
   affectedRecurringTasks,
   recurrenceLabel,
   tomorrow,
 } from "./lib/recurrence";
-import { nextRecurrenceDate } from "../domain/recurrence";
+import {
+  arrangementAncestorIds,
+  nextRecurrenceDate,
+} from "../domain/recurrence";
+import { unscheduledTasksDue } from "../domain/operations";
 import {
   localDate,
   newTask,
@@ -104,6 +116,13 @@ const affectedTemplates = computed(() =>
 );
 const changingOccurrences = ref(false);
 const date = ref(localDate());
+const lastRemoval = ref<{ date: string; taskIds: Set<string> }>();
+let removalNoticeTimer: number | undefined;
+function clearRemovalNotice() {
+  window.clearTimeout(removalNoticeTimer);
+  removalNoticeTimer = undefined;
+  lastRemoval.value = undefined;
+}
 let refreshingDate = false;
 async function refreshDate() {
   const next = localDate();
@@ -136,6 +155,7 @@ watch(
 );
 onBeforeUnmount(() => {
   clearInterval(dateTimer);
+  clearRemovalNotice();
   systemTheme.removeEventListener("change", applyTheme);
   window.removeEventListener("focus", refreshDate);
   document.removeEventListener("visibilitychange", refreshDate);
@@ -146,40 +166,134 @@ onMounted(async () => {
   await store.load();
   applyTheme();
 });
-const visibleTasks = computed(() =>
+const openTasks = computed(() =>
   store.state.tasks.filter(
+    (task) => task.status !== "done" || store.recurrences.get(task.id),
+  ),
+);
+const visibleTasks = computed(() =>
+  (view.value === "completed"
+    ? store.state.tasks.filter((task) => task.status === "done")
+    : openTasks.value
+  ).filter(
     (task) =>
-      (view.value === "completed"
-        ? task.status === "done"
-        : task.status !== "done") &&
       task.title.includes(search.value) &&
       (view.value !== "all" ||
         importanceFilter.value === "all" ||
         task.importance === importanceFilter.value) &&
       (view.value !== "all" ||
         typeFilter.value === "all" ||
-        (typeFilter.value === "repeated") === Boolean(task.recurrence)),
+        (typeFilter.value === "repeated") ===
+          Boolean(store.recurrences.get(task.id))),
+  ),
+);
+const tasksById = computed(
+  () => new Map(store.state.tasks.map((task) => [task.id, task])),
+);
+const taskRows = computed(() =>
+  taskGroupRows(
+    taskGroups(visibleTasks.value, (task) => task.id, tasksById.value),
   ),
 );
 const arrangements = computed(() =>
   store.state.arrangements
     .filter((item) => item.date === date.value)
     .flatMap((item) => {
-      const task = store.state.tasks.find((task) => task.id === item.taskId);
+      const task = tasksById.value.get(item.taskId);
       return task || item.recurrence ? [{ ...item, task }] : [];
     }),
 );
 const pending = computed(() => arrangements.value.filter((item) => !item.done));
+const dueToday = computed(() => unscheduledTasksDue(store.state, date.value));
+const dueTaskIds = computed(
+  () => new Set(dueToday.value.map((task) => task.id)),
+);
+const schedulingDueTask = ref(false);
+async function scheduleDueTask(task: Task, keyboard: boolean) {
+  if (schedulingDueTask.value) return;
+  if (date.value !== localDate()) {
+    await refreshDate();
+    return;
+  }
+  if (!dueToday.value.some((item) => item.id === task.id)) return;
+  schedulingDueTask.value = true;
+  try {
+    await store.dispatch({
+      type: "scheduleDueToday",
+      taskId: task.id,
+      date: date.value,
+    });
+    if (keyboard) await focusStageControl(task.id);
+  } catch {
+    // The workspace displays the failure and reloads the latest data.
+  } finally {
+    schedulingDueTask.value = false;
+  }
+}
+async function focusStageControl(taskId: string) {
+  await nextTick();
+  if (view.value !== "today" || document.activeElement !== document.body)
+    return;
+  const exact = document.querySelector<HTMLElement>(
+    `.today-plan [data-stage-task-id="${CSS.escape(taskId)}"]`,
+  );
+  const target = exact?.getClientRects().length
+    ? exact
+    : document.querySelector<HTMLElement>(
+        ".today-plan .focused .check, .today-plan .today-completed summary",
+      );
+  target?.focus();
+}
+const todayGroups = computed(() =>
+  taskGroups(
+    arrangements.value,
+    (item) => item.taskId,
+    tasksById.value,
+    (item) => arrangementAncestorIds(tasksById.value, item),
+  ).map(({ item, children }) => {
+    const subtasks = taskGroupRows(children, 1);
+    const ids = new Set([
+      item.taskId,
+      ...subtasks.map(({ item }) => item.taskId),
+    ]);
+    return { item, subtasks, ids };
+  }),
+);
+const pendingGroups = computed(() => {
+  const groupsByTaskId = new Map(
+    todayGroups.value.flatMap((group) =>
+      [...group.ids].map((id) => [id, group] as const),
+    ),
+  );
+  const seen = new Set<string>();
+  return pending.value.flatMap((anchor) => {
+    const group = groupsByTaskId.get(anchor.taskId)!;
+    if (seen.has(group.item.taskId)) return [];
+    seen.add(group.item.taskId);
+    return [{ ...group, anchor }];
+  });
+});
+const completedGroups = computed(() => {
+  const open = new Set(pendingGroups.value.map(({ item }) => item.taskId));
+  return todayGroups.value.filter(({ item }) => !open.has(item.taskId));
+});
+const completedGroupCount = computed(() =>
+  completedGroups.value.reduce(
+    (count, group) => count + 1 + group.subtasks.length,
+    0,
+  ),
+);
 const upcomingRepeatDays = computed(() => {
   const current = new Set(
     pending.value.filter((item) => item.recurrence).map((item) => item.taskId),
   );
   return new Map(
     store.state.tasks.flatMap((task) => {
-      if (!task.recurrence) return [];
+      const rule = store.recurrences.get(task.id)?.rule;
+      if (!rule) return [];
       const next = current.has(task.id)
         ? date.value
-        : nextRecurrenceDate(task.recurrence, tomorrow(date.value));
+        : nextRecurrenceDate(rule, tomorrow(date.value));
       return [[task.id, next] as const];
     }),
   );
@@ -187,18 +301,37 @@ const upcomingRepeatDays = computed(() => {
 const completed = computed(() =>
   arrangements.value.filter((item) => item.done),
 );
+const completedTodayIds = computed(
+  () => new Set(completed.value.map((item) => item.taskId)),
+);
+const visibleCompletedStages = computed(() =>
+  completed.value.filter((item) =>
+    (item.recurrence?.title ?? item.task?.title ?? "").includes(search.value),
+  ),
+);
 const focused = computed(
   () =>
-    pending.value.find((item) => item.taskId === focusId.value) ??
-    pending.value[0],
+    pendingGroups.value.find(
+      ({ ids }) => focusId.value && ids.has(focusId.value),
+    ) ?? pendingGroups.value[0],
 );
+const focusedTaskId = computed(() =>
+  pending.value.some((item) => item.taskId === focusId.value)
+    ? focusId.value
+    : (focused.value?.anchor.taskId ?? null),
+);
+const selectableToday = computed(() => [
+  ...pending.value.filter((item) => item.taskId === focusedTaskId.value),
+  ...pending.value.filter((item) => item.taskId !== focusedTaskId.value),
+]);
 const remaining = computed(() =>
-  pending.value.filter((item) => item.taskId !== focused.value?.taskId),
+  pendingGroups.value.filter((group) => group !== focused.value),
 );
 const moveNeighbors = computed(() => {
-  const queue = pending.value.some((item) => item.recurrence)
-    ? pending.value
+  const groups = pending.value.some((item) => item.recurrence)
+    ? pendingGroups.value
     : remaining.value;
+  const queue = groups.map(({ anchor }) => anchor);
   return new Map(
     queue.map((item, index) => [
       item.taskId,
@@ -206,6 +339,7 @@ const moveNeighbors = computed(() => {
     ]),
   );
 });
+const movingGroups = ref(false);
 const manageableItems = computed(() =>
   view.value === "today"
     ? pending.value.map((item) => ({ id: item.taskId }))
@@ -218,25 +352,35 @@ const pickedRepeat = computed(() =>
   pickedToday.value.filter((item) => item.recurrence),
 );
 const pickedTemporary = computed(() =>
-  pickedToday.value.filter((item) => !item.recurrence && item.task?.recurrence),
+  pickedToday.value.filter(
+    (item) => !item.recurrence && store.recurrences.get(item.taskId),
+  ),
 );
 const pickedOrdinary = computed(() =>
   pickedToday.value.flatMap((item) =>
-    item.task && !item.recurrence && !item.task.recurrence ? [item.task] : [],
+    item.task && !item.recurrence && !store.recurrences.get(item.taskId)
+      ? [item.task]
+      : [],
   ),
 );
-const skippedToday = computed(
-  () =>
-    store.state.skippedOccurrences?.filter(
-      (item) => item.arrangement.date === date.value,
-    ) ?? [],
-);
+const undoableRemovals = computed(() => {
+  const batch = lastRemoval.value;
+  if (!batch || batch.date !== date.value) return [];
+  return (store.state.skippedOccurrences ?? []).filter(
+    ({ arrangement }) =>
+      arrangement.date === batch.date && batch.taskIds.has(arrangement.taskId),
+  );
+});
 const allSelected = computed(
   () =>
     manageableItems.value.length > 0 &&
     manageableItems.value.every((item) => isSelected(item.id)),
 );
-watch(view, () => stopSelection());
+watch(view, () => {
+  stopSelection();
+  clearRemovalNotice();
+});
+watch(date, clearRemovalNotice);
 watch(manageableItems, (items) => {
   if (selecting.value) retainSelection(items);
 });
@@ -290,10 +434,43 @@ const occurrenceTask = computed(() =>
 function selectFocus(taskId: string) {
   focusId.value = taskId;
   contextTaskId.value = null;
+  void focusStageControl(taskId);
 }
 function moved(taskId: string, targetTaskId: string) {
   if (focusId.value === taskId || focusId.value === targetTaskId)
     focusId.value = null;
+}
+async function moveGroups(taskId: string, targetTaskId: string) {
+  if (movingGroups.value) return;
+  const source = pendingGroups.value.find(
+    ({ anchor }) => anchor.taskId === taskId,
+  );
+  const target = pendingGroups.value.find(
+    ({ anchor }) => anchor.taskId === targetTaskId,
+  );
+  if (!source || !target) return;
+  const pendingIds = (ids: Set<string>) =>
+    pending.value
+      .filter((item) => ids.has(item.taskId))
+      .map((item) => item.taskId);
+  movingGroups.value = true;
+  try {
+    await store.dispatch({
+      type: "moveTodayGroups",
+      date: date.value,
+      taskIds: pendingIds(source.ids),
+      targetTaskIds: pendingIds(target.ids),
+    });
+    moved(taskId, targetTaskId);
+  } catch {
+    // The workspace displays the failure and reloads the latest data.
+  } finally {
+    movingGroups.value = false;
+  }
+}
+async function skipArrangement(item: Arrangement, focusTaskId?: string) {
+  await removeTodayItems([item]);
+  if (focusTaskId) await focusStageControl(focusTaskId);
 }
 function toggleManaging() {
   if (selecting.value) stopSelection();
@@ -320,6 +497,8 @@ function openDelete() {
 async function removeTodayItems(items: Arrangement[]) {
   if (changingOccurrences.value) return;
   changingOccurrences.value = true;
+  const actionDate = date.value;
+  const taskIds = new Set<string>();
   try {
     for (const item of items) {
       await store.dispatch({
@@ -327,10 +506,16 @@ async function removeTodayItems(items: Arrangement[]) {
         taskId: item.taskId,
         date: item.date,
       });
+      if (item.recurrence) taskIds.add(item.taskId);
     }
   } catch {
     // The workspace displays errors and reloads the latest data.
   } finally {
+    if (taskIds.size && view.value === "today" && date.value === actionDate) {
+      clearRemovalNotice();
+      lastRemoval.value = { date: actionDate, taskIds };
+      removalNoticeTimer = window.setTimeout(clearRemovalNotice, 10_000);
+    }
     changingOccurrences.value = false;
   }
 }
@@ -338,16 +523,18 @@ async function restoreOccurrences() {
   if (changingOccurrences.value) return;
   changingOccurrences.value = true;
   try {
-    for (const { arrangement } of [...skippedToday.value].reverse()) {
+    for (const { arrangement } of [...undoableRemovals.value].reverse()) {
       await store.dispatch({
         type: "restoreOccurrence",
         taskId: arrangement.taskId,
         date: arrangement.date,
       });
+      lastRemoval.value?.taskIds.delete(arrangement.taskId);
     }
   } catch {
     // The remaining skipped items remain available for retry.
   } finally {
+    if (!undoableRemovals.value.length) clearRemovalNotice();
     changingOccurrences.value = false;
   }
 }
@@ -447,9 +634,7 @@ async function energy(event: Event) {
           @click="view = 'all'"
         >
           <ListTodo :size="18" /><span v-if="!sidebarCollapsed"
-            >所有任务<span>{{
-              store.state.tasks.filter((t) => t.status !== "done").length
-            }}</span></span
+            >所有任务<span>{{ openTasks.length }}</span></span
           ></button
         ><button
           :class="{ active: view === 'completed' }"
@@ -580,18 +765,21 @@ async function energy(event: Event) {
               >
             </template>
           </ManageBar>
-          <div v-if="skippedToday.length" class="notice recurrence-undo">
+          <div v-if="undoableRemovals.length" class="notice recurrence-undo">
             <span role="status"
-              >已从今天移除 {{ skippedToday.length }} 项重复安排</span
+              >已从今天移除 {{ undoableRemovals.length }} 项重复安排</span
             >
             <Button
               variant="ghost"
               :disabled="changingOccurrences"
               @click="restoreOccurrences"
-              >{{ skippedToday.length === 1 ? "撤销" : "撤销全部" }}</Button
+              >撤销</Button
             >
           </div>
-          <div v-if="!arrangements.length" class="empty-state">
+          <div
+            v-if="!arrangements.length && !dueToday.length"
+            class="empty-state"
+          >
             <Sun :size="28" />
             <h2>给今天一个开始</h2>
             <p>记下一件事，设定本次推进范围。也可以在右侧试着生成安排。</p>
@@ -599,20 +787,39 @@ async function energy(event: Event) {
               ><Plus :size="16" />记下一件事</Button
             >
           </div>
-          <div v-else :class="['today-plan', { selecting }]">
+          <div v-else-if="selecting" class="today-plan selecting">
+            <TaskCard
+              v-for="item in selectableToday"
+              :key="item.taskId"
+              :task="item.task"
+              :arrangement="item"
+              selectable
+              :selected="isSelected(item.taskId)"
+              @select="toggleSelection"
+            />
+          </div>
+          <div v-else-if="arrangements.length" class="today-plan">
             <TaskCard
               v-if="focused"
-              :task="focused.task"
-              :arrangement="focused"
-              :previous-task-id="moveNeighbors.get(focused.taskId)?.previous"
-              :next-task-id="moveNeighbors.get(focused.taskId)?.next"
+              :key="focused.item.taskId"
+              :task="focused.item.task"
+              :arrangement="focused.item"
+              :subtasks="focused.subtasks"
+              :focused-task-id="focusedTaskId"
+              :due-task-ids="dueTaskIds"
+              :move-task-id="focused.anchor.taskId"
+              :moving-group="movingGroups"
+              :previous-task-id="
+                moveNeighbors.get(focused.anchor.taskId)?.previous
+              "
+              :next-task-id="moveNeighbors.get(focused.anchor.taskId)?.next"
               focus
-              :selectable="selecting"
-              :selected="isSelected(focused.taskId)"
-              @select="toggleSelection"
               @edit="edit"
               @occurrence="openOccurrence"
-              @skip="removeTodayItems([$event])"
+              @skip="skipArrangement"
+              @move-group="moveGroups"
+              @focus-task="selectFocus"
+              @focus-stage="focusStageControl"
               @moved="moved"
             />
             <p v-else class="today-finished" role="status">
@@ -629,39 +836,65 @@ async function energy(event: Event) {
                 >
               </div>
               <TaskCard
-                v-for="item in remaining"
+                v-for="{ item, subtasks, anchor } in remaining"
                 :key="item.taskId"
                 :task="item.task"
                 :arrangement="item"
-                :previous-task-id="moveNeighbors.get(item.taskId)?.previous"
-                :next-task-id="moveNeighbors.get(item.taskId)?.next"
-                :selectable="selecting"
-                :selected="isSelected(item.taskId)"
-                @select="toggleSelection"
+                :subtasks="subtasks"
+                :due-task-ids="dueTaskIds"
+                :move-task-id="anchor.taskId"
+                :moving-group="movingGroups"
+                :previous-task-id="moveNeighbors.get(anchor.taskId)?.previous"
+                :next-task-id="moveNeighbors.get(anchor.taskId)?.next"
                 @edit="edit"
                 @occurrence="openOccurrence"
-                @skip="removeTodayItems([$event])"
+                @skip="skipArrangement"
+                @move-group="moveGroups"
                 @focus-task="selectFocus"
+                @focus-stage="focusStageControl"
                 @moved="moved"
               />
             </section>
-            <details
-              v-if="completed.length && !selecting"
-              class="today-completed"
-            >
+            <details v-if="completedGroups.length" class="today-completed">
               <summary>
-                已完成的今日阶段 <span>{{ completed.length }} 项</span>
+                已完成的今日阶段 <span>{{ completedGroupCount }} 项</span>
               </summary>
               <TaskCard
-                v-for="item in completed"
+                v-for="{ item, subtasks } in completedGroups"
                 :key="item.taskId"
                 :task="item.task"
                 :arrangement="item"
+                :subtasks="subtasks"
+                :due-task-ids="dueTaskIds"
                 @edit="edit"
                 @occurrence="openOccurrence"
+                @focus-stage="focusStageControl"
               />
             </details>
           </div>
+          <section
+            v-if="dueToday.length && !selecting"
+            class="today-due"
+            aria-labelledby="due-today-heading"
+          >
+            <div class="remaining-heading">
+              <h3 id="due-today-heading">预计今天完成</h3>
+            </div>
+            <ul>
+              <li v-for="task in dueToday" :key="task.id">
+                <button class="task-name" type="button" @click="edit(task)">
+                  {{ task.title }}
+                </button>
+                <Button
+                  variant="ghost"
+                  :disabled="schedulingDueTask"
+                  :aria-label="`安排到今天：${task.title}`"
+                  @click="scheduleDueTask(task, $event.detail === 0)"
+                  >安排到今天</Button
+                >
+              </li>
+            </ul>
+          </section>
           <p v-if="historicalUnfinished" class="notice today-notice">
             有
             {{ historicalUnfinished }}
@@ -743,17 +976,29 @@ async function energy(event: Event) {
             @toggle-all="toggleAll"
             @remove="openDelete"
           />
-          <div v-else class="list-heading">
-            <span>任务</span><span>{{ visibleTasks.length }} 项</span>
+          <div
+            v-else-if="view === 'all' || visibleTasks.length"
+            class="list-heading"
+          >
+            <span>{{ view === "completed" ? "整体完成" : "任务" }}</span><span
+              >{{ visibleTasks.length }} 项</span
+            >
           </div>
           <button
-            v-for="task in visibleTasks"
+            v-for="{ item: task, depth } in taskRows"
             :key="task.id"
             class="task-list-row"
             :class="{
+              'is-nested': depth > 0,
               selected: selecting && isSelected(task.id),
             }"
+            :style="{ '--task-indent': `${Math.min(depth, 4) * 16}px` }"
             :aria-pressed="selecting ? isSelected(task.id) : undefined"
+            :aria-description="
+              depth && task.parentId
+                ? `所属任务 · ${tasksById.get(task.parentId)?.title}`
+                : undefined
+            "
             @click="selecting ? toggleSelection(task.id) : edit(task)"
           >
             <span
@@ -762,23 +1007,34 @@ async function energy(event: Event) {
               :class="{ checked: isSelected(task.id) }"
               ><Check v-if="isSelected(task.id)" :size="12"
             /></span>
-            <CircleCheck v-else-if="task.status === 'done'" :size="17" /><span
-              v-else
-              class="list-dot"
-            ></span>
+            <CircleCheck
+              v-else-if="
+                task.status === 'done' || completedTodayIds.has(task.id)
+              "
+              :size="17"
+            /><span v-else class="list-dot"></span>
             <span class="list-task-name">
               <span class="task-title-line">
+                <span>{{ task.title }}</span>
                 <span
-                  ><small v-if="task.parentId">子任务 · </small
-                  >{{ task.title }}</span
+                  v-if="store.recurrences.get(task.id)"
+                  class="recurrence-tag"
                 >
-                <span v-if="task.recurrence" class="recurrence-tag">
                   <Repeat2 :size="12" aria-hidden="true" />重复
                 </span>
               </span>
-              <small v-if="task.recurrence" class="list-repeat-rule">{{
-                recurrenceLabel(task.recurrence)
-              }}</small>
+              <small
+                v-if="task.parentId && !depth && tasksById.has(task.parentId)"
+              >
+                所属任务 · {{ tasksById.get(task.parentId)?.title }}
+              </small>
+              <small
+                v-if="store.recurrences.get(task.id)"
+                class="list-repeat-rule"
+                >{{
+                  recurrenceLabel(store.recurrences.get(task.id)!.rule)
+                }}</small
+              >
             </span>
             <span class="list-task-details">
               <span
@@ -788,7 +1044,12 @@ async function energy(event: Event) {
               >
                 重要性 · {{ importanceLabels[task.importance] }}
               </span>
-              <small v-if="task.recurrence">
+              <small v-if="view === 'all' && completedTodayIds.has(task.id)"
+                >今日阶段已完成</small
+              >
+              <small
+                v-else-if="view === 'all' && store.recurrences.get(task.id)"
+              >
                 {{
                   upcomingRepeatDays.get(task.id) === date
                     ? "今日"
@@ -813,7 +1074,35 @@ async function energy(event: Event) {
               }}</small>
             </span>
           </button>
-          <p v-if="!visibleTasks.length" class="empty-state">
+          <section
+            v-if="
+              view === 'completed' &&
+              !selecting &&
+              visibleCompletedStages.length
+            "
+            class="today-completed"
+            aria-label="已完成的今日阶段"
+          >
+            <div class="list-heading">
+              <span>已完成的今日阶段</span
+              ><span>{{ visibleCompletedStages.length }} 项</span>
+            </div>
+            <TaskCard
+              v-for="item in visibleCompletedStages"
+              :key="item.taskId"
+              :task="item.task"
+              :arrangement="item"
+              @edit="edit"
+              @occurrence="openOccurrence"
+            />
+          </section>
+          <p
+            v-if="
+              !visibleTasks.length &&
+              (view === 'all' || !visibleCompletedStages.length)
+            "
+            class="empty-state"
+          >
             {{
               search ||
               (view === "all" &&
@@ -827,13 +1116,13 @@ async function energy(event: Event) {
     </main>
     <ChatPanel
       v-model:collapsed="chatCollapsed"
-      :focused-id="contextTaskId ?? focused?.task?.id ?? null"
+      :focused-id="contextTaskId ?? focusedTaskId"
       @resize="chatWidth = $event"
     />
     <Modal
       v-model:open="deleteOpen"
       :title="
-        deleteTargets.length === 1 && deleteTargets[0].recurrence
+        deleteTargets.length === 1 && store.recurrences.get(deleteTargets[0].id)
           ? '删除重复任务'
           : '删除任务'
       "

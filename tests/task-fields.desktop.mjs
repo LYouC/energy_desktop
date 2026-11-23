@@ -66,6 +66,7 @@ try {
   expect(Object.keys(parent).sort()).toEqual(Object.keys(child).sort());
   const rows = page.locator(".task-list-row");
   const parentRow = rows.filter({ hasText: "买洗衣液" });
+  await expect(rows.nth(1)).toHaveClass(/is-nested/);
   const importanceFilter = page.getByLabel("按重要性筛选");
   await expect(importanceFilter).toHaveValue("all");
   await expect(parentRow).toContainText("重要性 · 高");
@@ -127,6 +128,39 @@ try {
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(800);
   await page.screenshot({ path: "test-results/task-fields-narrow.png" });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "添加任务", exact: true }).click();
+  const today = await page.evaluate(() =>
+    new Date().toLocaleDateString("sv-SE"),
+  );
+  await dialog.getByLabel("任务名称").fill("吃牛奶");
+  await dialog.getByLabel("预计完成日期").fill(today);
+  await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
+  const beforePlan = await page.evaluate(() => window.desktop.load());
+  const dueTask = beforePlan.tasks.find((task) => task.title === "吃牛奶");
+  expect(
+    beforePlan.arrangements.some((item) => item.taskId === dueTask.id),
+  ).toBe(false);
+  await page.getByRole("button", { name: /今日安排/ }).click();
+  const dueSection = page.getByRole("region", { name: "预计今天完成" });
+  await expect(dueSection).toContainText("吃牛奶");
+  await dueSection
+    .getByRole("button", { name: "安排到今天：吃牛奶" })
+    .press("Enter");
+  await expect(dueSection).toHaveCount(0);
+  await expect(
+    page.locator(".task-card").filter({ hasText: "吃牛奶" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "完成今日阶段", exact: true }),
+  ).toBeFocused();
+  const plan = await page.evaluate(() => window.desktop.load());
+  expect(
+    plan.arrangements.filter((item) => item.taskId === dueTask.id),
+  ).toEqual([
+    { date: today, done: false, scope: "吃牛奶", taskId: dueTask.id },
+  ]);
+  expect(plan.messages).toHaveLength(0);
   expect(errors).toEqual([]);
   console.log(
     "PASS: minimal fields, importance filtering, shared child editor, dates, scheduling independence, SQLite restart, themes and narrow layout; no model calls",
