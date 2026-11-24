@@ -47,6 +47,7 @@ import {
 import {
   isArrangementDone,
   isArrangementPending,
+  schedulableTodayTasks,
   unscheduledTasksDue,
 } from "../domain/operations";
 import {
@@ -128,18 +129,21 @@ function clearRemovalNotice() {
   removalNoticeTimer = undefined;
   lastRemoval.value = undefined;
 }
-let refreshingDate = false;
-async function refreshDate() {
+let dateRefresh: Promise<void> | undefined;
+function refreshDate() {
   const next = localDate();
-  if (next === date.value || refreshingDate) return;
-  refreshingDate = true;
-  try {
-    if (!(await store.load())) return;
-    date.value = next;
-    occurrence.value = null;
-  } finally {
-    refreshingDate = false;
-  }
+  if (next === date.value) return;
+  dateRefresh ??= store
+    .load()
+    .then((loaded) => {
+      if (!loaded) return;
+      date.value = next;
+      occurrence.value = null;
+    })
+    .finally(() => {
+      dateRefresh = undefined;
+    });
+  return dateRefresh;
 }
 const dateTimer = setInterval(refreshDate, 30000);
 const systemTheme = matchMedia("(prefers-color-scheme: dark)");
@@ -217,7 +221,11 @@ const dueToday = computed(() => unscheduledTasksDue(store.state, date.value));
 const dueTaskIds = computed(
   () => new Set(dueToday.value.map((task) => task.id)),
 );
-const schedulingDueTask = ref(false);
+const schedulableTodayIds = computed(
+  () =>
+    new Set(schedulableTodayTasks(store.state, date.value).map(({ id }) => id)),
+);
+const schedulingToday = ref(false);
 async function completeDueTask(task: Task, keyboard: boolean) {
   try {
     await store.dispatch({ type: "setTaskDone", taskId: task.id, done: true });
@@ -226,25 +234,42 @@ async function completeDueTask(task: Task, keyboard: boolean) {
     // The workspace displays the failure and reloads the latest data.
   }
 }
-async function scheduleDueTask(task: Task, keyboard: boolean) {
-  if (schedulingDueTask.value) return;
-  if (date.value !== localDate()) {
-    await refreshDate();
+async function scheduleToday(taskId: string, event: MouseEvent) {
+  const source = view.value;
+  if (schedulingToday.value || selecting.value || source === "completed")
     return;
-  }
-  if (!dueToday.value.some((item) => item.id === task.id)) return;
-  schedulingDueTask.value = true;
+  const trigger = event.currentTarget;
+  const fromToday = source === "today";
+  schedulingToday.value = true;
   try {
+    if (date.value !== localDate()) await refreshDate();
+    if (date.value !== localDate() || view.value !== source || selecting.value)
+      return;
+    const eligible = fromToday ? dueTaskIds.value : schedulableTodayIds.value;
+    if (!eligible.has(taskId)) return;
     await store.dispatch({
-      type: "scheduleDueToday",
-      taskId: task.id,
+      type: fromToday ? "scheduleDueToday" : "scheduleToday",
+      taskId,
       date: date.value,
     });
-    if (keyboard) await focusStageControl(task.id);
   } catch {
     // The workspace displays the failure and reloads the latest data.
   } finally {
-    schedulingDueTask.value = false;
+    schedulingToday.value = false;
+    if (event.detail === 0) {
+      await nextTick();
+      if (view.value === source && document.activeElement === document.body) {
+        if (trigger instanceof HTMLElement && trigger.isConnected)
+          trigger.focus();
+        else if (fromToday) await focusStageControl(taskId);
+        else
+          document
+            .querySelector<HTMLElement>(
+              `.task-list-row[data-task-id="${CSS.escape(taskId)}"]`,
+            )
+            ?.focus();
+      }
+    }
   }
 }
 async function focusStageControl(taskId: string) {
@@ -918,9 +943,9 @@ async function energy(event: Event) {
                 </button>
                 <Button
                   variant="ghost"
-                  :disabled="schedulingDueTask"
+                  :disabled="schedulingToday"
                   :aria-label="`安排到今天：${task.title}`"
-                  @click="scheduleDueTask(task, $event.detail === 0)"
+                  @click="scheduleToday(task.id, $event)"
                   >安排到今天</Button
                 >
               </li>
@@ -1015,101 +1040,121 @@ async function energy(event: Event) {
               >{{ visibleTasks.length }} 项</span
             >
           </div>
-          <button
+          <div
             v-for="{ item: task, depth } in taskRows"
             :key="task.id"
-            class="task-list-row"
-            :class="{
-              'is-nested': depth > 0,
-              selected: selecting && isSelected(task.id),
-            }"
+            class="task-list-item"
+            :class="{ 'is-nested': depth > 0 }"
             :style="{ '--task-indent': `${Math.min(depth, 4) * 16}px` }"
-            :aria-pressed="selecting ? isSelected(task.id) : undefined"
-            :aria-description="
-              depth && task.parentId
-                ? `所属任务 · ${tasksById.get(task.parentId)?.title}`
-                : undefined
-            "
-            @click="selecting ? toggleSelection(task.id) : edit(task)"
           >
-            <span
-              v-if="selecting"
-              class="select-box"
-              :class="{ checked: isSelected(task.id) }"
-              ><Check v-if="isSelected(task.id)" :size="12"
-            /></span>
-            <CircleCheck
-              v-else-if="
-                task.status === 'done' || completedTodayIds.has(task.id)
+            <button
+              type="button"
+              class="task-list-row"
+              :class="{ selected: selecting && isSelected(task.id) }"
+              :data-task-id="task.id"
+              :aria-pressed="selecting ? isSelected(task.id) : undefined"
+              :aria-description="
+                depth && task.parentId
+                  ? `所属任务 · ${tasksById.get(task.parentId)?.title}`
+                  : undefined
               "
-              :size="17"
-            /><span v-else class="list-dot"></span>
-            <span class="list-task-name">
-              <span class="task-title-line">
-                <span>{{ task.title }}</span>
-                <span
-                  v-if="store.recurrences.get(task.id)"
-                  class="recurrence-tag"
-                >
-                  <Repeat2 :size="12" aria-hidden="true" />重复
-                </span>
-              </span>
-              <small
-                v-if="task.parentId && !depth && tasksById.has(task.parentId)"
-              >
-                所属任务 · {{ tasksById.get(task.parentId)?.title }}
-              </small>
-              <small
-                v-if="store.recurrences.get(task.id)"
-                class="list-repeat-rule"
-                >{{
-                  recurrenceLabel(store.recurrences.get(task.id)!.rule)
-                }}</small
-              >
-            </span>
-            <span class="list-task-details">
+              @click="selecting ? toggleSelection(task.id) : edit(task)"
+            >
               <span
-                v-if="view === 'all' && task.importance"
-                class="task-importance"
-                :class="{ 'task-importance-high': task.importance === 'high' }"
-              >
-                重要性 · {{ importanceLabels[task.importance] }}
+                v-if="selecting"
+                class="select-box"
+                :class="{ checked: isSelected(task.id) }"
+                ><Check v-if="isSelected(task.id)" :size="12"
+              /></span>
+              <CircleCheck
+                v-else-if="
+                  task.status === 'done' || completedTodayIds.has(task.id)
+                "
+                :size="17"
+              /><span v-else class="list-dot"></span>
+              <span class="list-task-name">
+                <span class="task-title-line">
+                  <span>{{ task.title }}</span>
+                  <span
+                    v-if="store.recurrences.get(task.id)"
+                    class="recurrence-tag"
+                  >
+                    <Repeat2 :size="12" aria-hidden="true" />重复
+                  </span>
+                </span>
+                <small
+                  v-if="task.parentId && !depth && tasksById.has(task.parentId)"
+                >
+                  所属任务 · {{ tasksById.get(task.parentId)?.title }}
+                </small>
+                <small
+                  v-if="store.recurrences.get(task.id)"
+                  class="list-repeat-rule"
+                  >{{
+                    recurrenceLabel(store.recurrences.get(task.id)!.rule)
+                  }}</small
+                >
               </span>
-              <small
-                v-if="task.status === 'done' && !store.recurrences.get(task.id)"
-                >{{ statusLabels.done }}</small
-              >
-              <small
-                v-else-if="view === 'all' && completedTodayIds.has(task.id)"
-                >今日阶段已完成</small
-              >
-              <small
-                v-else-if="view === 'all' && store.recurrences.get(task.id)"
-              >
-                {{
-                  upcomingRepeatDays.get(task.id) === date
+              <span class="list-task-details">
+                <span
+                  v-if="view === 'all' && task.importance"
+                  class="task-importance"
+                  :class="{
+                    'task-importance-high': task.importance === 'high',
+                  }"
+                >
+                  重要性 · {{ importanceLabels[task.importance] }}
+                </span>
+                <small
+                  v-if="
+                    task.status === 'done' && !store.recurrences.get(task.id)
+                  "
+                  >{{ statusLabels.done }}</small
+                >
+                <small
+                  v-else-if="view === 'all' && completedTodayIds.has(task.id)"
+                  >今日阶段已完成</small
+                >
+                <small
+                  v-else-if="view === 'all' && store.recurrences.get(task.id)"
+                >
+                  {{
+                    upcomingRepeatDays.get(task.id) === date
+                      ? "今日"
+                      : upcomingRepeatDays.get(task.id)
+                        ? `下次 ${upcomingRepeatDays.get(task.id)}`
+                        : "重复已结束"
+                  }}
+                </small>
+                <small v-else-if="task.status === 'abandoned'">主动放弃</small>
+                <small v-else>{{
+                  store.state.arrangements.some(
+                    (a) => a.taskId === task.id && a.date === date,
+                  )
                     ? "今日"
-                    : upcomingRepeatDays.get(task.id)
-                      ? `下次 ${upcomingRepeatDays.get(task.id)}`
-                      : "重复已结束"
-                }}
-              </small>
-              <small v-else-if="task.status === 'abandoned'">主动放弃</small>
-              <small v-else>{{
-                store.state.arrangements.some(
-                  (a) => a.taskId === task.id && a.date === date,
-                )
-                  ? "今日"
-                  : task.startDate && task.expectedDate
-                    ? `${task.startDate} → ${task.expectedDate}`
-                    : task.startDate
-                      ? `预计开始 ${task.startDate}`
-                      : task.expectedDate
-                        ? `预计完成 ${task.expectedDate}`
-                        : statusLabels[task.status]
-              }}</small>
-            </span>
-          </button>
+                    : task.startDate && task.expectedDate
+                      ? `${task.startDate} → ${task.expectedDate}`
+                      : task.startDate
+                        ? `预计开始 ${task.startDate}`
+                        : task.expectedDate
+                          ? `预计完成 ${task.expectedDate}`
+                          : statusLabels[task.status]
+                }}</small>
+              </span>
+            </button>
+            <Button
+              v-if="
+                view === 'all' && !selecting && schedulableTodayIds.has(task.id)
+              "
+              class="schedule-today-action"
+              variant="outline"
+              type="button"
+              :disabled="schedulingToday"
+              :aria-label="`安排到今天：${task.title}`"
+              @click="scheduleToday(task.id, $event)"
+              >安排到今天</Button
+            >
+          </div>
           <section
             v-if="
               view === 'completed' &&

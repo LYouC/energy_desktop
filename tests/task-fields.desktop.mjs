@@ -66,7 +66,10 @@ try {
   expect(Object.keys(parent).sort()).toEqual(Object.keys(child).sort());
   const rows = page.locator(".task-list-row");
   const parentRow = rows.filter({ hasText: "买洗衣液" });
-  await expect(rows.nth(1)).toHaveClass(/is-nested/);
+  await expect(
+    page.getByRole("button", { name: "安排到今天：买洗衣液" }),
+  ).toBeVisible();
+  await expect(page.locator(".task-list-item").nth(1)).toHaveClass(/is-nested/);
   const importanceFilter = page.getByLabel("按重要性筛选");
   await expect(importanceFilter).toHaveValue("all");
   await expect(parentRow).toContainText("重要性 · 高");
@@ -77,6 +80,9 @@ try {
   await expect(page.getByText("没有匹配的任务。")).toBeVisible();
   await search.clear();
   await page.getByRole("button", { name: "管理", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^安排到今天/ })).toHaveCount(
+    0,
+  );
   await page.getByRole("button", { name: "全选", exact: true }).click();
   await expect(parentRow).toHaveAttribute("aria-pressed", "true");
   await importanceFilter.selectOption({ label: "未设置重要性" });
@@ -160,10 +166,122 @@ try {
   ).toEqual([
     { date: today, done: false, scope: "吃牛奶", taskId: dueTask.id },
   ]);
-  expect(plan.messages).toHaveLength(0);
+
+  const tomorrow = await page.evaluate(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    return date.toLocaleDateString("sv-SE");
+  });
+  await page
+    .getByRole("button", { name: "记下一件事", exact: true })
+    .first()
+    .click();
+  await dialog.getByLabel("任务名称").fill("整理明天的材料");
+  await dialog.getByLabel("所属任务").selectOption(parent.id);
+  await dialog.getByLabel("预计开始日期").fill(tomorrow);
+  await dialog.getByLabel("预计完成日期").fill(tomorrow);
+  await dialog.getByText("安排一次推进", { exact: true }).click();
+  await dialog.getByLabel("推进日期").fill(tomorrow);
+  await dialog.getByLabel("本次阶段目标").fill("带齐明天要用的资料");
+  await dialog.getByRole("button", { name: "保存并安排", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: /所有任务/ }).click();
+  const action = page.getByRole("button", {
+    name: "安排到今天：整理明天的材料",
+  });
+  const futureRow = page
+    .locator(".task-list-row")
+    .filter({ hasText: "整理明天的材料" });
+  await expect(
+    page.locator(".task-list-item.is-nested").filter({ has: futureRow }),
+  ).toBeVisible();
+  await expect(futureRow).toContainText(`${tomorrow} → ${tomorrow}`);
+  await expect(action).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "安排到今天：选择规格" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "安排到今天：吃牛奶" }),
+  ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page
+        .locator(".main-scroll")
+        .evaluate(
+          (workspace) => workspace.scrollWidth <= workspace.clientWidth,
+        ),
+    )
+    .toBe(true);
+  await page.evaluate(async () => {
+    const state = await window.desktop.load();
+    await window.desktop.execute(state.revision, {
+      type: "energy",
+      value: "状态平稳",
+    });
+  });
+  await action.press("Enter");
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(action).toBeFocused();
+  await expect(action).toBeEnabled();
+  await action.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect(action).toHaveCount(0);
+  await expect(futureRow).toBeFocused();
+  await expect(futureRow).toContainText("今日");
+  await page.getByRole("button", { name: /今日安排/ }).click();
+  await expect(page.locator(".today-plan .task-name")).toHaveText([
+    "吃牛奶",
+    "整理明天的材料",
+  ]);
+  const scheduled = await page.evaluate(() => window.desktop.load());
+  const futureTask = scheduled.tasks.find(
+    (task) => task.title === "整理明天的材料",
+  );
+  expect(futureTask).toMatchObject({
+    startDate: tomorrow,
+    expectedDate: tomorrow,
+  });
+  expect(
+    scheduled.arrangements.filter((item) => item.taskId === futureTask.id),
+  ).toEqual([
+    {
+      taskId: futureTask.id,
+      date: tomorrow,
+      scope: "带齐明天要用的资料",
+      done: false,
+    },
+    {
+      taskId: futureTask.id,
+      date: today,
+      scope: "整理明天的材料",
+      done: false,
+    },
+  ]);
+  expect(scheduled.messages).toHaveLength(0);
+
+  const currentTime = Date.now();
+  const yesterday = new Date(currentTime);
+  yesterday.setDate(yesterday.getDate() - 1);
+  await page.clock.setSystemTime(yesterday);
+  await page.reload();
+  await page.getByRole("button", { name: /所有任务/ }).click();
+  const afterMidnight = page.getByRole("button", {
+    name: "安排到今天：买洗衣液",
+  });
+  await expect(afterMidnight).toBeVisible();
+  await page.clock.setSystemTime(currentTime);
+  await afterMidnight.click();
+  await expect(afterMidnight).toHaveCount(0);
+  const refreshed = await page.evaluate(() => window.desktop.load());
+  expect(refreshed.arrangements.at(-1)).toEqual({
+    taskId: parent.id,
+    date: today,
+    scope: "买洗衣液",
+    done: false,
+  });
   expect(errors).toEqual([]);
   console.log(
-    "PASS: minimal fields, importance filtering, shared child editor, dates, scheduling independence, SQLite restart, themes and narrow layout; no model calls",
+    "PASS: task fields, shared child editor, filters, both schedule-to-today entries, SQLite restart, themes and narrow layout; no model calls",
   );
 } finally {
   await app.close();

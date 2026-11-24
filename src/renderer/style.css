@@ -870,10 +870,22 @@ nav button span {
   font-size: 11px;
   padding-bottom: 10px;
 }
-.task-list-row {
-  width: 100%;
-  border: 0;
+.task-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
   border-bottom: 1px solid var(--line);
+}
+.task-list-item.is-nested {
+  margin-inline-start: var(--task-indent);
+  padding-inline-start: 6px;
+  border-inline-start: 1px solid var(--line);
+}
+.task-list-row {
+  flex: 1 0 min(12rem, 100%);
+  min-width: 0;
+  border: 0;
   background: none;
   display: flex;
   gap: 12px;
@@ -881,11 +893,10 @@ nav button span {
   padding: 12px 4px;
   text-align: left;
 }
-.task-list-row.is-nested {
-  width: calc(100% - var(--task-indent));
-  margin-inline-start: var(--task-indent);
-  padding-inline-start: 10px;
-  border-inline-start: 1px solid var(--line);
+.schedule-today-action {
+  flex: none;
+  margin: 4px 0 4px auto;
+  white-space: nowrap;
 }
 .list-task-name {
   flex: 1;

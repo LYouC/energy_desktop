@@ -283,7 +283,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     scope: z.string().trim().min(1),
   }),
   z.object({
-    type: z.literal("scheduleDueToday"),
+    type: z.literal(["scheduleToday", "scheduleDueToday"]),
     taskId: z.string(),
     date: recurrenceDate,
   }),

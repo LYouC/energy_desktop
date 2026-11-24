@@ -300,7 +300,9 @@ try {
     .locator(".task-list-row")
     .filter({ hasText: "检查行动项" });
   await expectInlineTag(childRow);
-  await expect(childRow).toHaveClass(/is-nested/);
+  await expect(
+    page.locator(".task-list-item.is-nested").filter({ has: childRow }),
+  ).toBeVisible();
   await page.getByLabel("搜索任务").fill("检查行动项");
   await expect(childRow).toContainText("所属任务 · 整理纪要");
   await page.getByLabel("搜索任务").clear();

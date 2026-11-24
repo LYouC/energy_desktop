@@ -8,6 +8,7 @@ import { emptyState, newTask } from "../src/domain/model";
 import {
   applyCommand,
   isArrangementPending,
+  schedulableTodayTasks,
   unscheduledTasksDue,
 } from "../src/domain/operations";
 import { WorkspaceDatabase } from "../src/persistence/storage";
@@ -125,7 +126,77 @@ test("预计完成入口以提交时的日期和计划为准，重复点击不�
   );
 });
 
-test("仍有当天移除记录的子任务不会从预计完成入口重复安排", () => {
+test("A22 所有任务可安排未来子任务，保留原日程、预计日期和今天的顺序", () => {
+  const date = "2026-11-24";
+  const future = "2026-11-25";
+  const parent = { ...newTask(), title: "准备早餐" };
+  const task = {
+    ...newTask(parent.id),
+    title: "吃牛奶",
+    startDate: future,
+    expectedDate: future,
+  };
+  const repeating = {
+    ...newTask(),
+    title: "阅读",
+    recurrence: { type: "weekly" as const, weekdays: [3] },
+  };
+  let state = emptyState();
+  for (const entry of [
+    parent,
+    task,
+    repeating,
+    { ...newTask(repeating.id), title: "选一篇文章" },
+    { ...newTask(), title: "已完成的任务", status: "done" as const },
+    { ...newTask(), title: "已放弃的任务", status: "abandoned" as const },
+  ])
+    state = applyCommand(state, { type: "saveTask", task: entry }, date);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: parent.id, date, scope: parent.title },
+    date,
+  );
+  state = applyCommand(
+    state,
+    {
+      type: "schedule",
+      taskId: task.id,
+      date: future,
+      scope: "准备明天的早餐",
+    },
+    date,
+  );
+  assert.deepEqual(
+    schedulableTodayTasks(state, date).map(({ id }) => id),
+    [task.id],
+  );
+  const command = { type: "scheduleToday", taskId: task.id, date } as const;
+  assert.deepEqual(
+    applyCommand(state, command, "2026-11-26").arrangements.filter(
+      (item) => item.taskId === task.id,
+    ),
+    [{ taskId: task.id, date: future, scope: "准备明天的早餐", done: false }],
+  );
+  const next = applyCommand(state, command, date);
+  assert.deepEqual(next.arrangements, [
+    ...state.arrangements,
+    { taskId: task.id, date, scope: task.title, done: false },
+  ]);
+  const updated = next.tasks.find(({ id }) => id === task.id);
+  assert.equal(updated?.startDate, future);
+  assert.equal(updated?.expectedDate, future);
+  const completed = applyCommand(
+    next,
+    { type: "stage", taskId: task.id, date, done: true },
+    date,
+  );
+  assert.deepEqual(
+    applyCommand(completed, command, date).arrangements,
+    completed.arrangements,
+  );
+});
+
+test("仍有当天移除记录的子任务不会从今日或所有任务入口重复安排", () => {
   const date = "2026-11-23";
   const parent = {
     ...newTask(),
@@ -150,13 +221,12 @@ test("仍有当天移除记录的子任务不会从预计完成入口重复安�
     date,
   );
   assert.deepEqual(unscheduledTasksDue(state, date), []);
-  const next = applyCommand(
-    state,
-    { type: "scheduleDueToday", taskId: task.id, date },
-    date,
-  );
-  assert.deepEqual(next.arrangements, state.arrangements);
-  assert.deepEqual(next.skippedOccurrences, state.skippedOccurrences);
+  assert.deepEqual(schedulableTodayTasks(state, date), []);
+  for (const type of ["scheduleDueToday", "scheduleToday"] as const) {
+    const next = applyCommand(state, { type, taskId: task.id, date }, date);
+    assert.deepEqual(next.arrangements, state.arrangements);
+    assert.deepEqual(next.skippedOccurrences, state.skippedOccurrences);
+  }
 });
 
 test("A21 整体完成覆盖各层一次性子任务，保留旧阶段与重复实例", () => {

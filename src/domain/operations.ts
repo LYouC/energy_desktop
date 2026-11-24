@@ -53,7 +53,7 @@ export function isArrangementPending(
   );
 }
 
-export function unscheduledTasksDue(state: State, date: string) {
+export function schedulableTodayTasks(state: State, date: string) {
   const recurrences = effectiveRecurrences(state.tasks);
   const planned = new Set(
     state.arrangements
@@ -64,10 +64,13 @@ export function unscheduledTasksDue(state: State, date: string) {
     if (arrangement.date === date) planned.add(arrangement.taskId);
   return state.tasks.filter(
     (task) =>
-      task.expectedDate === date &&
-      isTaskOpen(task) &&
-      !recurrences.get(task.id) &&
-      !planned.has(task.id),
+      isTaskOpen(task) && !recurrences.get(task.id) && !planned.has(task.id),
+  );
+}
+
+export function unscheduledTasksDue(state: State, date: string) {
+  return schedulableTodayTasks(state, date).filter(
+    (task) => task.expectedDate === date,
   );
 }
 
@@ -606,11 +609,14 @@ export function applyCommand(
     case "schedule":
       schedule(state, command.taskId, command.date, command.scope);
       break;
+    case "scheduleToday":
     case "scheduleDueToday": {
       if (command.date !== date) break;
-      const task = unscheduledTasksDue(state, date).find(
-        ({ id }) => id === command.taskId,
-      );
+      const eligible =
+        command.type === "scheduleDueToday"
+          ? unscheduledTasksDue(state, date)
+          : schedulableTodayTasks(state, date);
+      const task = eligible.find(({ id }) => id === command.taskId);
       if (task) schedule(state, task.id, date, task.title);
       break;
     }
