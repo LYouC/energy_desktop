@@ -17,6 +17,8 @@
 
 `schedulableTodayTasks` 查询可新增当天安排的开放一次性任务，排除已有当天安排或移除记录的任务。`unscheduledTasksDue` 在此基础上按预计完成日期过滤。`scheduleToday` 与 `scheduleDueToday` 分别供所有任务和预计完成区使用，均在写入时重新核对本地日期和资格，并以任务名追加安排。
 
+提前推进调整卡用 `todayOnly` 标记新增当天安排。在接受时重新核对日期及 `schedulableTodayTasks`，避免跨日写入或覆盖已有安排。
+
 `moveTodayGroups` 在同一次命令中交换两组当天待推进安排的相对位置，保留各组内部顺序。子任务同级调序使用 `move`。
 
 Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑属性复用子任务字段，拆分时所属任务由父任务确定。子任务可仅提供名称，也可保存自己的说明、状态与预计起止日期。旧方案读取时将 children.goal 转入 description，新工具协议拒绝旧字段，避免静默丢失内容。子任务日期沿用普通任务校验。

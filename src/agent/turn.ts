@@ -85,7 +85,23 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     ...existingTask,
     date: z.iso.date(),
     scope: z.string().min(1),
-    fromDate: z.iso.date().optional(),
+    fromDate: z.iso
+      .date()
+      .optional()
+      .describe("仅移动已有安排时填写原日期。新增一次推进并保留原安排时省略。"),
+  }),
+  z.strictObject({
+    type: z
+      .literal("advanceTask")
+      .describe("从近期查询结果提议新增一次今日推进，保留原安排和预计日期。"),
+    taskId: existingTask.taskId,
+    mode: z.literal("proposal"),
+    scope: z.string().trim().min(1).describe("今天独立可完成的推进范围。"),
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .describe("说明为何适合今天推进、估时和已知前提。"),
   }),
   z.object({
     type: z.literal("unschedule"),
@@ -367,6 +383,7 @@ export function applyAgentTurn(
     if (
       (recurrences.get(sourceId) || (task && recurrences.get(task.id))) &&
       (action.type === "schedule" ||
+        action.type === "advanceTask" ||
         action.type === "unschedule" ||
         action.type === "updateArrangement" ||
         action.type === "stage")
@@ -436,7 +453,7 @@ export function applyAgentTurn(
       type:
         action.type === "updateTask"
           ? "update"
-          : action.type === "updateArrangement"
+          : action.type === "updateArrangement" || action.type === "advanceTask"
             ? "schedule"
             : action.type,
       date:
@@ -444,6 +461,7 @@ export function applyAgentTurn(
           ? action.date
           : action.type === "updateRecurrence" ||
               action.type === "deleteRecurringTask" ||
+              action.type === "advanceTask" ||
               (action.type === "split" &&
                 action.children.some((child) => child.todayScope))
             ? date
@@ -456,6 +474,7 @@ export function applyAgentTurn(
       ...(action.type === "schedule" && action.fromDate
         ? { fromDate: action.fromDate }
         : {}),
+      ...(action.type === "advanceTask" ? { todayOnly: true } : {}),
       ...("done" in action ? { done: action.done } : {}),
       ...(action.type === "updateRecurrence"
         ? { recurrence: action.recurrence }

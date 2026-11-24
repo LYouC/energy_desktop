@@ -3,9 +3,261 @@ import assert from "node:assert/strict";
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { AgentRuntime, generateAgentTurn } from "../src/agent/runtime";
+import { upcomingTasks } from "../src/agent/context";
 import { WorkspaceDatabase } from "../src/persistence/storage";
-import { emptyState } from "../src/domain/model";
+import {
+  emptyState,
+  newTask,
+  type Arrangement,
+  type Task,
+} from "../src/domain/model";
 import { applyAgentTurn } from "../src/agent/turn";
+import { applyCommand } from "../src/domain/operations";
+
+test("近期候选包含日期与计划命中，排除今天两区、结束、重复和保留移除记录的任务", () => {
+  const today = "2026-12-29";
+  const through = "2027-01-05";
+  const task = (id: string, patch: Partial<Task> = {}): Task => ({
+    ...newTask(),
+    id,
+    title: id,
+    ...patch,
+  });
+  const arrangement = (
+    taskId: string,
+    date: string,
+    done = false,
+  ): Arrangement => ({
+    taskId,
+    date,
+    scope: `${taskId} ${date}`,
+    done,
+  });
+  const state = emptyState();
+  state.tasks = [
+    task("starts", {
+      startDate: "2026-12-30",
+      description: "需先拿到材料",
+      importance: "high",
+    }),
+    task("ends", { expectedDate: through, parentId: "starts" }),
+    task("future-plan"),
+    task("day-eight", { expectedDate: "2027-01-06" }),
+    task("completed-plan"),
+    task("already-planned", { expectedDate: through }),
+    task("due-today", { expectedDate: today }),
+    task("complete", { expectedDate: through, status: "done" }),
+    task("abandoned", { expectedDate: through, status: "abandoned" }),
+    task("template", { recurrence: { type: "daily" } }),
+    task("inherits", { expectedDate: through, parentId: "template" }),
+    task("skipped", { expectedDate: through }),
+    task("undated"),
+    task("past", { expectedDate: "2026-12-28" }),
+  ];
+  state.arrangements = [
+    arrangement("future-plan", through),
+    arrangement("future-plan", "2026-12-30"),
+    arrangement("future-plan", "2026-12-31", true),
+    arrangement("future-plan", "2027-01-06"),
+    arrangement("future-plan", "2026-12-28"),
+    arrangement("completed-plan", "2027-01-01", true),
+    arrangement("already-planned", today),
+    arrangement("due-today", through),
+    arrangement("deleted-task", through),
+  ];
+  state.skippedOccurrences = [
+    {
+      arrangement: {
+        ...arrangement("skipped", today),
+        recurrence: { title: "已移除" },
+      },
+      previousTaskIds: [],
+      nextTaskIds: [],
+    },
+  ];
+  const before = structuredClone(state);
+  const results = upcomingTasks(state, today, through);
+  assert.deepEqual(
+    results.map(({ id }) => id),
+    ["starts", "ends", "future-plan"],
+  );
+  assert.deepEqual(
+    results.map(({ description, importance, parentId }) => [
+      description,
+      importance,
+      parentId,
+    ]),
+    [
+      ["需先拿到材料", "high", null],
+      ["", null, "starts"],
+      ["", null, null],
+    ],
+  );
+  assert.deepEqual(results[2].arrangements, [
+    { date: "2026-12-30", scope: "future-plan 2026-12-30" },
+    { date: through, scope: "future-plan 2027-01-05" },
+  ]);
+  assert.deepEqual(state, before);
+});
+
+test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建议", async (context) => {
+  const date = "2026-12-29";
+  const db = new WorkspaceDatabase(":memory:", () => date);
+  context.after(() => db.close());
+  const near = {
+    ...newTask(),
+    title: "核对表单",
+    startDate: "2027-01-02",
+    expectedDate: "2027-01-05",
+  };
+  const far = {
+    ...newTask(),
+    title: "汇总远期记录",
+    expectedDate: "2027-01-06",
+  };
+  const initial = db.execute(db.load().revision, {
+    type: "saveTask",
+    task: near,
+    arrangement: { date: "2027-01-02", scope: "核对所有表单" },
+  });
+  const before = db.execute(initial.revision, {
+    type: "saveTask",
+    task: far,
+    arrangement: { date: "2027-01-06", scope: "汇总全部远期记录" },
+  });
+  const advance = {
+    name: "prepareTurn",
+    input: {
+      intent: "changes",
+      actions: [
+        {
+          type: "advanceTask",
+          mode: "proposal",
+          taskId: near.id,
+          scope: "核对所有表单",
+          reason: "今天还有足够时间。",
+        },
+      ],
+    },
+  };
+  let step = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      const results = JSON.stringify(
+        options.prompt.filter(({ role }) => role === "tool"),
+      );
+      switch (++step) {
+        case 1:
+          assert.doesNotMatch(
+            JSON.stringify(options.prompt),
+            /核对表单|汇总远期记录/,
+          );
+          return response([
+            { name: "readUpcomingTasks", input: { days: 8 } },
+            { name: "readUpcomingTasks", input: { days: 3 } },
+          ]);
+        case 2:
+          assert.equal(results.match(/"through":/g)?.length, 1);
+          assert.match(
+            results,
+            /"from":"2026-12-30","through":"2027-01-01","tasks":\[\]/,
+          );
+          return response([advance]);
+        case 3:
+          assert.match(
+            results,
+            /提前推进须从本轮 readUpcomingTasks 返回的候选选择/,
+          );
+          return response([{ name: "readUpcomingTasks", input: {} }]);
+        case 4:
+          assert.match(results, /"through":"2027-01-05"/);
+          assert.match(results, /核对表单/);
+          assert.doesNotMatch(results, /汇总远期记录/);
+          return response([{ name: "readUpcomingTasks", input: { days: 3 } }]);
+        case 5:
+          // The narrower follow-up does not discard the candidate already read in this turn.
+          assert.equal(results.match(/"through":"2027-01-01"/g)?.length, 2);
+          return response([advance]);
+        default:
+          assert.doesNotMatch(results, /汇总远期记录|汇总全部远期记录/);
+          return response([], "建议今天核对表单，接受后生效。");
+      }
+    },
+  });
+  const runtime = new AgentRuntime(
+    db,
+    () => connection,
+    (options) => generateAgentTurn({ ...options, model }),
+  );
+  const proposed = await runtime.send(
+    {
+      runId: crypto.randomUUID(),
+      sessionId: before.activeSessionId,
+      text: "未来一周有什么能提前到今天？先给建议。",
+      focusedId: null,
+      source: "optimizeToday",
+    },
+    () => {},
+  );
+  assert.equal(step, 6);
+  assert.deepEqual(proposed.tasks, before.tasks);
+  assert.deepEqual(proposed.arrangements, before.arrangements);
+  const proposal = proposed.proposals[0];
+  const card = proposal.cards[0];
+  assert.equal(card.status, "pending");
+  const resolve = {
+    type: "resolve" as const,
+    proposalId: proposal.id,
+    cardIds: [card.id],
+    accept: true,
+  };
+  assert.throws(
+    () => applyCommand(proposed, resolve, "2026-12-30"),
+    /本地日期已变化/,
+  );
+  assert.equal(proposed.proposals[0].cards[0].status, "pending");
+  const conflicting = applyAgentTurn(
+    before,
+    before.activeSessionId,
+    "测试同轮变更",
+    {
+      text: "有一条已确认的今日安排。",
+      actions: [
+        {
+          type: "schedule",
+          mode: "direct",
+          taskId: near.id,
+          date,
+          scope: "已确认的范围",
+        },
+        ...advance.input.actions,
+      ],
+    },
+    undefined,
+    date,
+  );
+  const conflictProposal = conflicting.proposals.at(-1)!;
+  assert.throws(
+    () =>
+      applyCommand(
+        conflicting,
+        {
+          ...resolve,
+          proposalId: conflictProposal.id,
+          cardIds: [conflictProposal.cards[0].id],
+        },
+        date,
+      ),
+    /已有今日安排/,
+  );
+  assert.equal(conflicting.arrangements.at(-1)?.scope, "已确认的范围");
+  const accepted = db.execute(proposed.revision, resolve);
+  assert.deepEqual(accepted.arrangements, [
+    ...before.arrangements,
+    { taskId: near.id, date, scope: "核对所有表单", done: false },
+  ]);
+  assert.equal(accepted.tasks[0].expectedDate, near.expectedDate);
+});
 
 test("SDK 可由模板补加当天实例，终答收到单次范围和完成结果", async () => {
   const state = emptyState();

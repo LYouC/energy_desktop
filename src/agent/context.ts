@@ -6,7 +6,59 @@ import {
   type Task,
 } from "../domain/model";
 import { effectiveRecurrences } from "../domain/recurrence";
-import { isTaskOpen, unscheduledTasksDue } from "../domain/operations";
+import {
+  isTaskOpen,
+  schedulableTodayTasks,
+  unscheduledTasksDue,
+} from "../domain/operations";
+
+export function upcomingTasks(state: State, today: string, through: string) {
+  const inWindow = (date: string) => date > today && date <= through;
+  const arrangementsByTask = new Map<
+    string,
+    Pick<Arrangement, "date" | "scope">[]
+  >();
+  for (const { taskId, date, scope, done, recurrence } of state.arrangements) {
+    if (done || recurrence || !inWindow(date)) continue;
+    const entries = arrangementsByTask.get(taskId) ?? [];
+    entries.push({ date, scope });
+    arrangementsByTask.set(taskId, entries);
+  }
+  return schedulableTodayTasks(state, today).flatMap(
+    ({
+      id,
+      title,
+      parentId,
+      status,
+      importance,
+      startDate,
+      expectedDate,
+      description,
+    }) => {
+      const arrangements = arrangementsByTask.get(id) ?? [];
+      if (
+        expectedDate === today ||
+        !(inWindow(startDate) || inWindow(expectedDate) || arrangements.length)
+      )
+        return [];
+      return [
+        {
+          id,
+          title,
+          parentId,
+          status,
+          importance,
+          startDate,
+          expectedDate,
+          description,
+          arrangements: arrangements.sort((a, b) =>
+            a.date.localeCompare(b.date),
+          ),
+        },
+      ];
+    },
+  );
+}
 
 export function arrangementForAgent(item: Arrangement, task?: Task) {
   return !item.recurrence && !task?.recurrence && task?.status === "done"

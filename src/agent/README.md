@@ -6,7 +6,7 @@
 | [prompt.ts](prompt.ts)     | 息序的角色、任务、行为指令与示例。                                                                                         |
 | [config.ts](config.ts)     | `AgentConfig` 管理模型地址、模型名和凭据，公开视图只传出 Key 是否可用。                                                    |
 | [turn.ts](turn.ts)         | 定义模型动作及整轮结果的 schema，通过 `applyAgentTurn` 把动作应用成业务状态。                                              |
-| [context.ts](context.ts)   | 组装当前会话、任务和安排的上下文，按游标读取同会话历史。界面预览共用 `buildContext`。                                      |
+| [context.ts](context.ts)   | 组装本轮上下文、查询近期候选、按游标读取同会话历史。界面预览共用 `buildContext`。                                          |
 | [capacity.ts](capacity.ts) | 根据分钟估时计算总量、缺口、单项容量和条件性分配，预留 15 分钟缓冲。                                                       |
 
 本模块复用[领域模型与命令](../domain/README.md)。运行层接收工作区读写接口，由[桌面宿主](../desktop/README.md)接入 SQLite 和 IPC。配置从宿主接收凭据加密能力。
@@ -19,7 +19,7 @@
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
 
-「一键优化」通过 `sendAgent` 的 `source: "optimizeToday"` 标记请求。上下文同时包含当天安排 `today` 与预计今天完成的未安排任务 `dueToday`。用户消息保留已有草稿，`prepareTurn` 拒绝直接执行业务动作，并通过工具回执交给模型修正。部分推进通过 `split.children[].todayScope` 提议新子任务的当天安排，接受后可独立完成。开发版可在模型服务的传输入口捕获实际 JSON 请求体，包含系统指令、工作区上下文、消息、工具定义及后续步骤的回执。
+「一键优化」通过 `sendAgent` 的 `source: "optimizeToday"` 标记请求。上下文同时包含当天安排 `today` 与预计今天完成的未安排任务 `dueToday`。本轮默认的未完成任务详情与安排回执聚焦今天，近期候选按需查询。用户消息保留已有草稿，`prepareTurn` 拒绝直接执行业务动作，并通过工具回执交给模型修正。部分推进通过 `split.children[].todayScope` 提议新子任务的当天安排，接受后可独立完成。开发版可在模型服务的传输入口捕获实际 JSON 请求体，包含系统指令、工作区上下文、消息、工具定义及后续步骤的回执。
 
 每轮构建上下文时读取操作系统本地时间，将 `YYYY-MM-DD HH:mm` 写入 `context.time` 和系统指令。Agent 直接使用本轮时间回答当前日期和钟点，安排使用工作区日期及 `calendar` 锚点。离线 SDK 测试核对决策和终答都收到同一时间，B10 校验真实模型的回复。
 
@@ -38,11 +38,14 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 | 模型工具            | 职责                                                   |
 | ------------------- | ------------------------------------------------------ |
 | `readTask`          | 按 ID 查看任务、子任务和历史安排                       |
+| `readUpcomingTasks` | 按需读取从明天起一至七天内的提前推进候选               |
 | `readConversation`  | 按游标读取当前会话更早的原话                           |
 | `calculateCapacity` | 计算可用时间、任务估时和缓冲的容量关系                 |
 | `prepareTurn`       | 提交 intent、actions 及可选 memory，预演后返回业务回执 |
 
 `prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝整张任务调整卡。
+
+`readUpcomingTasks({days})` 从本轮工作区日期的次日开始，默认查七天，返回 `from/through/tasks`。查询复用今日入队资格，并排除预计今天完成的任务。按预计起止日期或窗口内未完成的普通安排命中，返回任务属性和窗口内待推进安排的日期与范围。模型用 `advanceTask` 从本轮成功查询过的候选中提议提前，必须提供范围与理由，日期使用本轮工作区日期。该动作生成现有的安排调整卡，接受时核对日期及入队资格。明确指名的任务和改期仍按已有详情或安排流程处理。
 
 重复任务在 `createTask` 动作顶层填写 `recurrence`。已有任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除重复任务。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效，拆分重复父任务生成的子任务跟随父规则。删除同时删除后代任务并保留已生成的本地实例。存在子任务时需明确指定 `includeChildren`。
 

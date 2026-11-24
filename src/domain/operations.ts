@@ -765,6 +765,16 @@ export function applyCommand(
         )
           throw new Error("请选择对应的重复任务操作。");
         if (change.type === "schedule") {
+          if (change.todayOnly) {
+            if (change.date !== date)
+              throw new Error("本地日期已变化，请重新生成提前推进建议。");
+            if (
+              !schedulableTodayTasks(state, date).some(
+                ({ id }) => id === change.taskId,
+              )
+            )
+              throw new Error("任务已有今日安排或已无法推进，请重新分析。");
+          }
           // 同批较早的变更也可能已移除源安排，实际替换前再次检查，失败整批回滚。
           if (
             change.fromTaskId &&

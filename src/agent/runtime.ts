@@ -15,6 +15,7 @@ import {
   readConversation,
   refersToCurrentTasks,
   tasksForAgent,
+  upcomingTasks,
 } from "./context";
 import { localDate, type Command, type State } from "../domain/model";
 import { applyCommand } from "../domain/operations";
@@ -131,6 +132,7 @@ export async function generateAgentTurn(options: {
   let memory: AgentTurn["memory"];
   let streamFinalReply = false;
   let prepared: AgentTurn["actions"] | undefined;
+  const upcomingTaskIds = new Set<string>();
   let streamError = false;
   const validationErrors: string[] = [];
   emit({ type: "status", text: "正在结合最新任务与背景分析…" });
@@ -157,6 +159,16 @@ export async function generateAgentTurn(options: {
   };
   // 保留真实的user/assistant轮次，让短答自然承接上一轮，而不是把整段对话塞成一条JSON消息。
   const { recentMessages, ...workspaceContext } = context;
+  if (options.suggestOnly) {
+    const todayTaskIds = new Set([
+      ...context.today.map(({ taskId }) => taskId),
+      ...context.dueToday.map(({ id }) => id),
+    ]);
+    // 一键优化先核算今天，未来安排由模型按需查询。
+    workspaceContext.unfinishedTasks = context.unfinishedTasks.filter(
+      ({ id }) => todayTaskIds.has(id),
+    );
+  }
   const messages = recentMessages.map(({ role, text }) => ({
     role,
     content: text,
@@ -168,7 +180,7 @@ export async function generateAgentTurn(options: {
     messages.push({ role: "user", content: userText });
   const prepareTurn = tool({
     description:
-      "结合完整对话判断本轮意图并提交具体决定。纯交流选择conversation且actions为空，用户要求执行或需要展示正式方案时选择changes并提交相应动作。程序执行该决定，随后根据回执自然回复。每轮都需要此决定。",
+      "结合完整对话判断本轮意图并提交具体决定。纯交流选择conversation且actions为空，执行或提出正式方案时选择changes。每个任务的首个proposal动作必须填actions[].reason作为卡片理由。程序执行后根据回执自然回复。每轮都需要此决定。",
     inputSchema: decisionSchema,
     execute: async ({ intent, actions, memory: nextMemory }) => {
       if (prepared) throw new Error("本轮决定已准备完成，请根据回执回复。");
@@ -181,6 +193,16 @@ export async function generateAgentTurn(options: {
         )
           throw new Error(
             "一键优化只允许提出待用户接受的方案，请改用 proposal 或仅交流。",
+          );
+        if (
+          actions.some(
+            (action) =>
+              action.type === "advanceTask" &&
+              !upcomingTaskIds.has(action.taskId),
+          )
+        )
+          throw new Error(
+            "提前推进须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
           );
         const next = applyAgentTurn(
           state,
@@ -201,7 +223,7 @@ export async function generateAgentTurn(options: {
         const missingReason = newProposal?.cards.find((card) => !card.reason);
         if (missingReason)
           throw new Error(
-            `请为「${missingReason.title}」的调整卡填写一条具体理由，并重新提交完整动作。`,
+            `请在「${missingReason.title}」的首个 proposal 动作的 reason 字段填写一条具体理由，并重新提交完整动作。`,
           );
         if (newProposal)
           for (const card of newProposal.cards)
@@ -275,7 +297,8 @@ export async function generateAgentTurn(options: {
             .filter(
               (item) =>
                 nextTasks.has(item.taskId) &&
-                (!item.recurrence || item.date === context.date),
+                (item.date === context.date ||
+                  (!options.suggestOnly && !item.recurrence)),
             )
             .map(withTaskTitle),
           skippedToday: (next.skippedOccurrences ?? [])
@@ -413,6 +436,29 @@ export async function generateAgentTurn(options: {
           "规划有明确可用时间和任务估时，先调用此工具核算容量。所有数值单位为分钟，估计仍保留不确定性。",
         inputSchema: capacitySchema,
         execute: async (input) => calculateCapacity(input),
+      }),
+      readUpcomingTasks: tool({
+        description:
+          "只读查询从明天起最多七个本地日历日内、尚未纳入今天的一次性任务。按预计开始、预计完成或未完成的普通安排匹配，返回任务背景、重要性与窗口内的待推进范围。提前推进或确认今日有余量时使用。",
+        inputSchema: z.object({
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(7)
+            .default(7)
+            .describe("从明天开始向后查询的天数，含最后一天。"),
+        }),
+        execute: async ({ days }) => {
+          const through = dateAt(days);
+          const tasks = upcomingTasks(state, context.date, through);
+          for (const { id } of tasks) upcomingTaskIds.add(id);
+          return {
+            from: calendar.tomorrow,
+            through,
+            tasks,
+          };
+        },
       }),
       readTask: tool({
         description:

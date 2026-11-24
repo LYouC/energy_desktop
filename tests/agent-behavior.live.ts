@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { generateAgentTurn, type TurnTrace } from "../src/agent/runtime";
+import { capacitySchema } from "../src/agent/capacity";
 import { applyAgentTurn, type AgentTurn } from "../src/agent/turn";
 import { applyCommand } from "../src/domain/operations";
 import {
@@ -68,6 +69,7 @@ async function run(
     turn: AgentTurn,
     trace: TurnTrace,
   ) => void,
+  suggestOnly = false,
 ) {
   if (filters.length && !filters.some((filter) => name.includes(filter)))
     return initial;
@@ -80,6 +82,7 @@ async function run(
       sessionId: state.activeSessionId,
       focusedId: null,
       userText: user,
+      suggestOnly,
       connection,
       signal: AbortSignal.timeout(120000),
       emit: () => {},
@@ -536,5 +539,145 @@ await run(
       [[tomorrow, "核对发票"]],
     );
   },
+);
+function daysFromToday(days: number) {
+  const date = new Date(`${today}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return localDate(date);
+}
+
+const reviewList = {
+  ...newTask(),
+  title: "核对评审清单",
+  importance: "high" as const,
+  description: "清单已齐，核对所有条目约 15 分钟，可以提前做完。",
+  expectedDate: tomorrow,
+};
+const pendingMaterials = {
+  ...newTask(),
+  title: "整理供应商回执",
+  description: "回执明天签发，今天拿不到。收到后约 10 分钟能整理完。",
+  expectedDate: tomorrow,
+};
+const distantTask = {
+  ...newTask(),
+  title: "汇总远期记录",
+  expectedDate: daysFromToday(8),
+  description: "约 5 分钟。",
+};
+const todayTask = { ...newTask(), title: "提交费用报表", expectedDate: today };
+let upcomingState = applyCommand(emptyState(), {
+  type: "saveTask",
+  task: reviewList,
+  arrangement: { date: tomorrow, scope: "核对清单所有条目" },
+});
+for (const task of [pendingMaterials, distantTask])
+  upcomingState = applyCommand(upcomingState, { type: "saveTask", task });
+const withTodayTask = applyCommand(upcomingState, {
+  type: "saveTask",
+  task: todayTask,
+  arrangement: { date: today, scope: "核对金额并提交报表" },
+});
+
+function checkEarlierProposal(
+  before: State,
+  next: State,
+  turn: AgentTurn,
+  trace: TurnTrace,
+) {
+  assert(trace.tools?.includes("readUpcomingTasks"));
+  assert.deepEqual(next.tasks, before.tasks);
+  assert.deepEqual(next.arrangements, before.arrangements);
+  assert.equal(turn.actions.length, 1);
+  const [action] = turn.actions;
+  assert(action.type === "advanceTask" && action.mode === "proposal");
+  assert.equal(action.taskId, reviewList.id);
+  const cards = next.proposals.at(-1)?.cards;
+  assert.equal(cards?.length, 1);
+  assert.equal(cards?.[0].status, "pending");
+  assert.equal(cards?.[0].changes[0].date, today);
+  assert.equal(cards?.[0].changes[0].fromDate, undefined);
+}
+
+const earlier = await run(
+  "B12a 明确请求提前推进",
+  upcomingState,
+  "今天没有其他安排，精力还够，留完休息和缓冲之后还有 25 分钟。未来一周有没有一件可以提前做完？给我一个待接受方案，原安排先保留。",
+  ["查询近期候选，跳过依赖未满足的回执；说明今日范围、理由和原安排保留。"],
+  checkEarlierProposal,
+);
+await run(
+  "B12b 接受提前推进卡",
+  earlier,
+  "好，接受这张提前推进的调整卡。",
+  ["确认的是对应调整卡，回执准确说明今天的新增安排和保留的原计划。"],
+  (before, next, turn) => {
+    const proposal = before.proposals.at(-1);
+    assert(proposal);
+    assert(
+      turn.actions.some(
+        (action) =>
+          action.type === "resolve" &&
+          action.accept &&
+          action.cardIds.includes(proposal.cards[0].id),
+      ),
+    );
+    assert.equal(next.proposals.at(-1)?.cards[0].status, "accepted");
+    assert.deepEqual(next.arrangements.slice(0, -1), before.arrangements);
+    assert.equal(next.arrangements.at(-1)?.taskId, reviewList.id);
+    assert.equal(next.arrangements.at(-1)?.date, today);
+    assert.equal(
+      next.tasks.find((task) => task.id === reviewList.id)?.expectedDate,
+      tomorrow,
+    );
+  },
+);
+await run(
+  "B12c 今日优化有余量",
+  withTodayTask,
+  "今天总共还有一小时，精力也足够。今天必须先交费用报表，约 20 分钟。帮我优化今天的安排，有合适的调整请给我待接受方案。",
+  [
+    "先保住报表并考虑缓冲，确认有余量后按需查询。给出的提前范围能在余量内完成。",
+  ],
+  (before, next, turn, trace) => {
+    checkEarlierProposal(before, next, turn, trace);
+    const capacity = trace.tools?.indexOf("calculateCapacity") ?? -1;
+    const query = trace.tools?.indexOf("readUpcomingTasks") ?? -1;
+    assert(capacity >= 0 && capacity < query);
+    const input = capacitySchema.parse(trace.calls?.[capacity]?.input);
+    assert.equal(input.availableMinutes, 60);
+    assert.deepEqual(
+      input.tasks.map(({ estimatedMinutes }) => estimatedMinutes),
+      [20],
+    );
+  },
+  true,
+);
+await run(
+  "B12d 今日容量不足",
+  withTodayTask,
+  "今天总共只剩 25 分钟，费用报表必须今天提交，完整做完至少要 35 分钟。帮我看看今天怎么排，先跟我商量。",
+  ["指出今天至少缺 10 分钟，优先协商当前交付条件，未加未来工作。"],
+  (before, next, turn, trace) => {
+    assert(trace.tools?.includes("calculateCapacity"));
+    assert(!trace.tools?.includes("readUpcomingTasks"));
+    const input = capacitySchema.parse(
+      trace.calls?.find(({ name }) => name === "calculateCapacity")?.input,
+    );
+    assert.equal(input.availableMinutes, 25);
+    assert.deepEqual(
+      input.tasks.map(({ estimatedMinutes }) => estimatedMinutes),
+      [35],
+    );
+    assert(turn.actions.every((action) => action.mode === "proposal"));
+    assert.deepEqual(next.tasks, before.tasks);
+    assert.deepEqual(next.arrangements, before.arrangements);
+    assert(
+      !next.proposals
+        .flatMap((proposal) => proposal.cards)
+        .some(({ taskId }) => taskId !== todayTask.id),
+    );
+  },
+  true,
 );
 save();

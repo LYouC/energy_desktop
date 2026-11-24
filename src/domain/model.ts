@@ -159,6 +159,7 @@ const changeSchema = z.object({
   ),
   patch: taskPatchSchema.optional(),
   fromDate: z.string().optional(),
+  todayOnly: z.literal(true).optional(),
   fromTaskId: z.string().optional(),
   fromTaskTitle: z.string().optional(),
   targetTaskTitle: z.string().optional(),
