@@ -152,7 +152,7 @@ try {
     page.locator(".task-card").filter({ hasText: "吃牛奶" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "完成今日阶段", exact: true }),
+    page.getByRole("button", { name: "完成任务", exact: true }),
   ).toBeFocused();
   const plan = await page.evaluate(() => window.desktop.load());
   expect(

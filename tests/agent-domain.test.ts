@@ -123,6 +123,104 @@ test("Agent拆分支持简单子任务和完整属性，非法子任务日期整
   assert.deepEqual(state, before);
 });
 
+test("A20 今日优化同时看到已安排和待安排任务，部分推进整卡接受并独立完成", () => {
+  const date = "2026-11-24";
+  const tomorrow = "2026-11-25";
+  const parent = { ...newTask(), title: "整理发票", expectedDate: date };
+  const other = { ...newTask(), title: "准备报告", expectedDate: date };
+  let state = emptyState();
+  for (const task of [parent, other])
+    state = applyCommand(state, { type: "saveTask", task }, date);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: other.id, date, scope: other.title },
+    date,
+  );
+  const context = buildContext(state, state.activeSessionId, date);
+  assert.deepEqual(
+    context.today.map(({ taskId }) => taskId),
+    [other.id],
+  );
+  assert.deepEqual(
+    context.dueToday.map(({ id }) => id),
+    [parent.id],
+  );
+  const proposed = applyAgentTurn(
+    state,
+    state.activeSessionId,
+    "优化今天",
+    {
+      text: "建议今天核对本周的发票。",
+      actions: [
+        {
+          type: "split",
+          taskId: parent.id,
+          mode: "proposal",
+          reason: "今天的时间只够处理本周的发票。",
+          children: [
+            { title: "核对本周发票", todayScope: "核对本周已收到的发票" },
+          ],
+        },
+      ],
+    },
+    undefined,
+    date,
+  );
+  assert.deepEqual(proposed.tasks, state.tasks);
+  assert.deepEqual(proposed.arrangements, state.arrangements);
+  const [proposal] = proposed.proposals;
+  const resolve = {
+    type: "resolve" as const,
+    proposalId: proposal.id,
+    cardIds: [proposal.cards[0].id],
+    accept: true,
+  };
+  assert.throws(() => applyCommand(proposed, resolve, tomorrow), /原建议当天/);
+  const fresh = applyAgentTurn(
+    proposed,
+    state.activeSessionId,
+    "今天就照这样拆并安排",
+    {
+      text: "已拆分并安排。",
+      actions: [
+        {
+          type: "split",
+          taskId: parent.id,
+          mode: "direct",
+          children: proposal.cards[0].changes[0].children,
+        },
+      ],
+    },
+    undefined,
+    tomorrow,
+  );
+  assert.equal(fresh.proposals[0].cards[0].status, "pending");
+  assert.equal(fresh.arrangements.at(-1)?.date, tomorrow);
+  const rejected = applyCommand(proposed, { ...resolve, accept: false }, date);
+  assert.deepEqual(rejected.tasks, state.tasks);
+  assert.deepEqual(rejected.arrangements, state.arrangements);
+  const accepted = applyCommand(proposed, resolve, date);
+  const child = accepted.tasks.find((task) => task.parentId === parent.id)!;
+  assert.deepEqual(
+    accepted.arrangements.map(({ taskId }) => taskId),
+    [other.id, child.id],
+  );
+  assert.equal(accepted.arrangements[1].scope, "核对本周已收到的发票");
+  const finished = applyCommand(
+    accepted,
+    { type: "setTaskDone", taskId: child.id, done: true },
+    date,
+  );
+  assert.equal(
+    finished.tasks.find(({ id }) => id === child.id)?.status,
+    "done",
+  );
+  assert.equal(
+    finished.tasks.find(({ id }) => id === parent.id)?.status,
+    "todo",
+  );
+});
+
 test("Agent动作与草稿拒绝旧字段，历史拆分读取时保留旧目标内容", () => {
   for (const field of [
     "goal",

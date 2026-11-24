@@ -100,6 +100,7 @@ export const taskPatchSchema = taskSchema
 export const childTaskSchema = taskPatchSchema.omit({ parentId: true }).extend({
   title: taskSchema.shape.title,
   description: taskSchema.shape.description.default(""),
+  todayScope: z.string().trim().min(1).optional(),
 });
 // 会话工作记忆由模型整理。待创建内容仍留在会话里，用户接受后才成为真实任务。
 export const agentMemorySchema = z.object({
@@ -270,6 +271,11 @@ export const commandSchema = z.discriminatedUnion("type", [
       .optional(),
   }),
   z.object({ type: z.literal("deleteTask"), id: z.string() }),
+  z.object({
+    type: z.literal("setTaskDone"),
+    taskId: z.string(),
+    done: z.boolean(),
+  }),
   z.object({
     type: z.literal("schedule"),
     taskId: z.string(),

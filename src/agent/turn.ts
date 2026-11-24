@@ -334,7 +334,7 @@ export function applyAgentTurn(
         : undefined;
     if (!sourceTask && !occurrence)
       throw new Error(
-        `操作${action.type}引用的任务${action.taskId}不存在。请使用已保存任务id或本批createTask.ref，本批已声明的ref为${JSON.stringify([...references.keys()])}。待接受拆分尚未建立真实子任务，今日建议可关联父任务并在scope写具体范围。修正引用后保留完整操作重新提交。`,
+        `操作${action.type}引用的任务${action.taskId}不存在。请使用已保存任务id或本批createTask.ref，本批已声明的ref为${JSON.stringify([...references.keys()])}。待接受拆分尚未建立真实子任务，用split.children中的todayScope为新子任务建议今天的范围。修正引用后保留完整操作重新提交。`,
       );
     let task = sourceTask;
     if (action.type === "updateArrangement") {
@@ -389,6 +389,7 @@ export function applyAgentTurn(
                 status === "pending" &&
                 taskId === id &&
                 change.type === "split" &&
+                (!change.date || change.date === date) &&
                 change.taskVersion === version &&
                 JSON.stringify(change.children) ===
                   JSON.stringify(action.children)
@@ -442,7 +443,9 @@ export function applyAgentTurn(
         "date" in action
           ? action.date
           : action.type === "updateRecurrence" ||
-              action.type === "deleteRecurringTask"
+              action.type === "deleteRecurringTask" ||
+              (action.type === "split" &&
+                action.children.some((child) => child.todayScope))
             ? date
             : "",
       scope: "scope" in action ? action.scope : "",

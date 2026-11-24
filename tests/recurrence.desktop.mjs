@@ -459,14 +459,14 @@ try {
     "--task-indent: 12px;",
   );
   await expect(
-    branch.getByRole("button", { name: /完成子任务今日阶段/ }),
+    branch.getByRole("button", { name: /完成子任务：/ }),
   ).toHaveCount(1);
   await branch
     .getByRole("button", { name: "今天安排的孙任务的安排操作" })
     .press("Enter");
   await page.getByRole("menuitem", { name: "移出当日", exact: true }).click();
   await expect(
-    branch.getByRole("button", { name: /完成子任务今日阶段/ }),
+    branch.getByRole("button", { name: /完成子任务：/ }),
   ).toHaveCount(0);
   const state = await page.evaluate(() => window.desktop.load());
   const remainingTask = state.tasks.find(

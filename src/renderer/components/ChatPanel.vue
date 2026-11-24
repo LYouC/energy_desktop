@@ -27,6 +27,10 @@ import { useWorkspace } from "@/stores/workspace";
 import { recurrenceLabel } from "@/lib/recurrence";
 import { buildContext } from "../../agent/context";
 import {
+  isArrangementPending,
+  unscheduledTasksDue,
+} from "../../domain/operations";
+import {
   localDate,
   statusLabels,
   type AdjustmentCard,
@@ -59,9 +63,19 @@ const emptyOptimization = ref(false);
 const checkingToday = ref(false);
 const hasPendingToday = computed(() => {
   const today = localDate();
-  const tasks = new Set(store.state.tasks.map((task) => task.id));
-  return store.state.arrangements.some(
-    (item) => item.date === today && !item.done && tasks.has(item.taskId),
+  const tasks = new Map(store.state.tasks.map((task) => [task.id, task]));
+  return (
+    unscheduledTasksDue(store.state, today).length > 0 ||
+    store.state.arrangements.some(
+      (item) =>
+        item.date === today &&
+        tasks.has(item.taskId) &&
+        isArrangementPending(
+          item,
+          tasks.get(item.taskId),
+          Boolean(store.recurrences.get(item.taskId)),
+        ),
+    )
   );
 });
 const runError = ref("");
@@ -253,7 +267,7 @@ async function optimizeToday() {
   }
   if (emptyOptimization.value) return;
   await send(
-    "请看看今天还未完成的安排，结合任务优先级、当前能量和已知时间约束，看看怎样安排更合适。如果有调整，请只提出待我接受的方案，不要直接修改任务或安排。如果今天没有待推进的安排，请告诉我。",
+    "请一起看看今天已安排但尚未完成的事项，以及预计今天完成但尚未安排的任务。结合重要性、当前能量和已知时间约束，看看怎样安排更合适。如果有调整，请只提出待我接受的方案，我接受后再修改任务或安排。",
     "optimizeToday",
   );
 }
@@ -378,7 +392,7 @@ function changeSummary(change: Change) {
     return target;
   }
   if (change.type === "split")
-    return `拆分为 ${change.children.map((child) => child.title).join("、")}`;
+    return `拆分为 ${change.children.map((child) => (child.todayScope ? `${child.title}（安排到 ${change.date} · ${child.todayScope}）` : child.title)).join("、")}`;
   if (change.type === "unschedule") return `取消 ${change.date} 的安排`;
   if (change.type === "stage")
     return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}${completionDetails(change)}`;
@@ -612,7 +626,7 @@ onBeforeUnmount(() => {
           class="optimization-note muted"
           role="status"
         >
-          今天没有待推进的安排可优化。
+          今天没有待优化的安排或预计完成任务。
         </p>
         <form class="composer" @submit.prevent="send()">
           <textarea

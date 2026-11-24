@@ -1,5 +1,18 @@
-import { localDate, type Change, type State, type Task } from "../domain/model";
+import {
+  localDate,
+  type Arrangement,
+  type Change,
+  type State,
+  type Task,
+} from "../domain/model";
 import { effectiveRecurrences } from "../domain/recurrence";
+import { isTaskOpen, unscheduledTasksDue } from "../domain/operations";
+
+export function arrangementForAgent(item: Arrangement, task?: Task) {
+  return !item.recurrence && !task?.recurrence && task?.status === "done"
+    ? { ...item, taskDone: true }
+    : item;
+}
 
 export function tasksForAgent(
   tasks: Task[],
@@ -32,10 +45,9 @@ export function buildContext(state: State, sessionId: string, date?: string) {
   const today = localDate(now);
   date ??= today;
   const tasks = tasksForAgent(state.tasks);
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
   const taskIds = new Set(tasks.map((task) => task.id));
-  const active = tasks.filter(
-    (task) => task.recurrence || !["done", "abandoned"].includes(task.status),
-  );
+  const active = tasks.filter((task) => task.recurrence || isTaskOpen(task));
   const messages = state.messages.filter(
     (message) => message.sessionId === sessionId,
   );
@@ -51,9 +63,18 @@ export function buildContext(state: State, sessionId: string, date?: string) {
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 10),
-    today: state.arrangements.filter(
-      (item) => item.date === date && taskIds.has(item.taskId),
-    ),
+    today: state.arrangements
+      .filter(
+        (item) =>
+          item.date === date &&
+          taskIds.has(item.taskId) &&
+          (item.done ||
+            item.recurrence ||
+            tasksById.get(item.taskId)?.recurrence ||
+            tasksById.get(item.taskId)?.status !== "abandoned"),
+      )
+      .map((item) => arrangementForAgent(item, tasksById.get(item.taskId))),
+    dueToday: unscheduledTasksDue(state, date),
     skippedToday: (state.skippedOccurrences ?? [])
       .map(({ arrangement }) => arrangement)
       .filter((item) => item.date === date && taskIds.has(item.taskId)),

@@ -32,17 +32,23 @@ try {
       const currentMessage = body.messages.findLast(
         ({ role }) => role === "user",
       );
-      const optimizing = currentMessage.content.includes("今天还未完成的安排");
+      const optimizing =
+        currentMessage.content.includes("预计今天完成但尚未安排");
       const decision = optimizing
         ? {
             intent: "changes",
             actions: [
               {
-                type: "updateArrangement",
+                type: "split",
                 mode: previousResult ? "proposal" : "direct",
                 taskId: "report",
-                date: new Date().toLocaleDateString("sv-SE"),
-                scope: "只写提纲",
+                children: [
+                  {
+                    title: "写提纲",
+                    description: "列出三个要点",
+                    todayScope: "列出三个要点",
+                  },
+                ],
                 reason: "先完成提纲，降低今天的工作量。",
               },
             ],
@@ -88,7 +94,7 @@ try {
   const load = () => page.evaluate(() => window.desktop.load());
   await optimize.click();
   await expect(
-    page.getByText("今天没有待推进的安排可优化。", { exact: true }),
+    page.getByText("今天没有待优化的安排或预计完成任务。", { exact: true }),
   ).toBeVisible();
   expect((await load()).messages).toHaveLength(0);
   expect(await capturedBodies()).toHaveLength(0);
@@ -107,19 +113,13 @@ try {
         title: "写报告",
         description: "",
         startDate: "",
-        expectedDate: "",
+        expectedDate: now.toLocaleDateString("sv-SE"),
         status: "todo",
         parentId: null,
         updatedAt: now.toISOString(),
       },
     });
-    const scheduled = await window.desktop.execute(state.revision, {
-      type: "schedule",
-      taskId: "report",
-      date: now.toLocaleDateString("sv-SE"),
-      scope: "写完报告初稿",
-    });
-    const recurring = await window.desktop.execute(scheduled.revision, {
+    const recurring = await window.desktop.execute(state.revision, {
       type: "saveTask",
       task: {
         ...state.tasks[0],
@@ -129,7 +129,13 @@ try {
         recurrence: { type: "daily" },
       },
     });
-    await window.desktop.execute(recurring.revision, {
+    const finished = await window.desktop.execute(recurring.revision, {
+      type: "stage",
+      taskId: "archived",
+      date: now.toLocaleDateString("sv-SE"),
+      done: true,
+    });
+    await window.desktop.execute(finished.revision, {
       type: "deleteTask",
       id: "archived",
     });
@@ -138,20 +144,23 @@ try {
   await composer.fill("保留没写完的草稿");
   await optimize.click();
   await expect(page.locator(".message.user")).toContainText(
-    "今天还未完成的安排",
+    "预计今天完成但尚未安排",
   );
   await expect(page.locator(".proposal")).toBeVisible();
   await expect(composer).toHaveValue("保留没写完的草稿");
   const optimized = await load();
   expect(optimized.messages).toHaveLength(2);
   expect(optimized.sessions[0].draft).toBe("保留没写完的草稿");
-  expect(optimized.arrangements[0].scope).toBe("写完报告初稿");
+  expect(optimized.tasks.map(({ title }) => title)).toEqual(["写报告"]);
+  expect(optimized.arrangements.some((item) => item.taskId === "report")).toBe(
+    false,
+  );
   expect(
     optimized.arrangements.some((item) => item.taskId === "archived"),
   ).toBe(true);
   expect(optimized.proposals[0].cards[0]).toMatchObject({
     status: "pending",
-    changes: [{ scope: "只写提纲" }],
+    changes: [{ children: [{ title: "写提纲", todayScope: "列出三个要点" }] }],
   });
   const firstRequests = await capturedBodies();
   expect(firstRequests).toHaveLength(3);
@@ -160,6 +169,29 @@ try {
   expect(JSON.stringify(firstRequests[1].messages)).toContain(
     "一键优化只允许提出待用户接受的方案",
   );
+  const workspaceMessage = firstRequests[0].messages.find(
+    ({ content }) =>
+      typeof content === "string" && content.startsWith("以下JSON是工作区数据"),
+  );
+  const { context } = JSON.parse(workspaceMessage.content.split("\n")[1]);
+  expect(context.today).toEqual([]);
+  expect(context.dueToday).toMatchObject([{ id: "report" }]);
+  await page
+    .locator(".proposal")
+    .getByRole("button", { name: "接受", exact: true })
+    .click();
+  await expect(page.locator(".proposal")).toContainText("已接受 · 已生效");
+  const childCard = page
+    .locator(".task-card.focused")
+    .filter({ hasText: "写提纲" });
+  await childCard
+    .getByRole("button", { name: "完成任务", exact: true })
+    .click();
+  const completed = await load();
+  expect(completed.tasks.find(({ title }) => title === "写提纲").status).toBe(
+    "done",
+  );
+  expect(completed.tasks.find(({ id }) => id === "report").status).toBe("todo");
 
   await composer.fill("第二轮消息");
   await page.getByRole("button", { name: "发送", exact: true }).click();

@@ -671,10 +671,13 @@ nav button span {
 .today-due li {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 6px 2px;
   border-bottom: 1px solid var(--line);
+}
+.today-due .task-name {
+  flex: 1;
+  text-align: left;
 }
 .next-step {
   color: var(--accent);

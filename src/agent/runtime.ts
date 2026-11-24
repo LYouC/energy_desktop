@@ -10,6 +10,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import { agentTurnSchema, applyAgentTurn, type AgentTurn } from "./turn";
 import {
+  arrangementForAgent,
   buildContext,
   readConversation,
   refersToCurrentTasks,
@@ -221,17 +222,20 @@ export async function generateAgentTurn(options: {
         );
         const nextTasks = new Map(updatedTasks.map((task) => [task.id, task]));
         const nextTaskIds = new Set(nextTasks.keys());
-        const withTaskTitle = ({
-          taskId,
-          ...arrangement
-        }: State["arrangements"][number]) => ({
-          ...arrangement,
-          recurrence: arrangement.recurrence
-            ? { title: arrangement.recurrence.title }
-            : undefined,
-          taskTitle:
-            arrangement.recurrence?.title ?? nextTasks.get(taskId)?.title,
-        });
+        const withTaskTitle = (item: State["arrangements"][number]) => {
+          const task = nextTasks.get(item.taskId);
+          const { taskId: _taskId, ...arrangement } = arrangementForAgent(
+            item,
+            task,
+          );
+          return {
+            ...arrangement,
+            recurrence: arrangement.recurrence
+              ? { title: arrangement.recurrence.title }
+              : undefined,
+            taskTitle: arrangement.recurrence?.title ?? task?.title,
+          };
+        };
         prepared = actions;
         memory = next.sessions.find(
           (session) => session.id === sessionId,
@@ -421,11 +425,13 @@ export async function generateAgentTurn(options: {
             task,
             children: contextTasks.filter((t) => t.parentId === taskId),
             arrangements: task
-              ? state.arrangements.filter(
-                  (item) =>
-                    item.taskId === taskId &&
-                    (!item.recurrence || item.date === context.date),
-                )
+              ? state.arrangements
+                  .filter(
+                    (item) =>
+                      item.taskId === taskId &&
+                      (!item.recurrence || item.date === context.date),
+                  )
+                  .map((item) => arrangementForAgent(item, task))
               : [],
             skippedToday: context.skippedToday.filter(
               (item) => item.taskId === taskId,

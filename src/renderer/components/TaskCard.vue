@@ -39,6 +39,7 @@ const props = defineProps<{
   nextTaskId?: string;
   selectable?: boolean;
   selected?: boolean;
+  stageRecord?: boolean;
   subtasks?: { item: Arrangement & { task?: Task }; depth: number }[];
 }>();
 const emit = defineEmits<{
@@ -160,14 +161,30 @@ function openDetails(item: Arrangement, task?: Task) {
   if (item.recurrence) emit("occurrence", item);
   else if (task) emit("edit", task);
 }
-async function stage(item: Arrangement, keyboard: boolean) {
+function completesTask(item: Arrangement, task?: Task) {
+  return (
+    !props.stageRecord &&
+    !item.recurrence &&
+    !store.recurrences.get(item.taskId) &&
+    (!item.done || task?.status === "done")
+  );
+}
+async function toggleCompletion(
+  item: Arrangement,
+  task: Task | undefined,
+  keyboard: boolean,
+) {
   try {
-    await store.dispatch({
-      type: "stage",
-      taskId: item.taskId,
-      date: item.date,
-      done: !item.done,
-    });
+    await store.dispatch(
+      completesTask(item, task)
+        ? { type: "setTaskDone", taskId: item.taskId, done: !item.done }
+        : {
+            type: "stage",
+            taskId: item.taskId,
+            date: item.date,
+            done: !item.done,
+          },
+    );
     if (keyboard) emit("focusStage", item.taskId);
   } catch {}
 }
@@ -227,15 +244,19 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
     <div class="task-head">
       <button
         class="check"
-        :aria-label="arrangement.done ? '恢复今日阶段' : '完成今日阶段'"
+        :aria-label="`${arrangement.done ? '恢复' : '完成'}${completesTask(arrangement, task) ? '任务' : '今日阶段'}`"
         :aria-pressed="arrangement.done"
         :title="
-          !arrangement.done && hasPendingChildren
-            ? '同时完成今天已安排的子任务'
-            : undefined
+          arrangement.done
+            ? undefined
+            : completesTask(arrangement, task)
+              ? '同时完成各层未完成的一次性子任务'
+              : hasPendingChildren
+                ? '同时完成今天已安排的子任务'
+                : undefined
         "
         :data-stage-task-id="arrangement.taskId"
-        @click="stage(arrangement, $event.detail === 0)"
+        @click="toggleCompletion(arrangement, task, $event.detail === 0)"
       >
         <SquareCheck v-if="arrangement.done" :size="17" /><Square
           v-else
@@ -265,7 +286,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
               >预计完成 {{ task.expectedDate }}</template
             > </span
           ><span
-            >{{ arrangement.done ? "整体任务：" : ""
+            >{{ arrangement.done && task.status !== "done" ? "整体任务：" : ""
             }}{{ statusLabels[task.status] }}</span
           >
         </div>
@@ -304,10 +325,16 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
             <button
               type="button"
               class="check child-check"
-              :aria-label="`${child.item.done ? '恢复' : '完成'}子任务今日阶段：${child.title}`"
+              :aria-label="`${child.item.done ? '恢复' : '完成'}子任务${completesTask(child.item, child.item.task) ? '' : '今日阶段'}：${child.title}`"
               :aria-pressed="child.item.done"
               :data-stage-task-id="child.item.taskId"
-              @click="stage(child.item, $event.detail === 0)"
+              @click="
+                toggleCompletion(
+                  child.item,
+                  child.item.task,
+                  $event.detail === 0,
+                )
+              "
             >
               <SquareCheck v-if="child.item.done" :size="17" /><Square
                 v-else
@@ -334,7 +361,12 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
               }}</small>
             </div>
             <small>{{
-              child.item.done ? "今日阶段已完成" : "今日待推进"
+              child.item.task?.status === "done" &&
+              completesTask(child.item, child.item.task)
+                ? statusLabels.done
+                : child.item.done
+                  ? "今日阶段已完成"
+                  : "今日待推进"
             }}</small>
             <DropdownMenuRoot
               v-if="!child.item.done || !child.item.recurrence"

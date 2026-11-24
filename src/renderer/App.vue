@@ -17,6 +17,7 @@ import {
   Coffee,
   Search,
   Check,
+  Square,
   PanelLeftClose,
   PanelLeftOpen,
   Repeat2,
@@ -43,7 +44,11 @@ import {
   arrangementAncestorIds,
   nextRecurrenceDate,
 } from "../domain/recurrence";
-import { unscheduledTasksDue } from "../domain/operations";
+import {
+  isArrangementDone,
+  isArrangementPending,
+  unscheduledTasksDue,
+} from "../domain/operations";
 import {
   localDate,
   newTask,
@@ -166,15 +171,10 @@ onMounted(async () => {
   await store.load();
   applyTheme();
 });
-const openTasks = computed(() =>
-  store.state.tasks.filter(
-    (task) => task.status !== "done" || store.recurrences.get(task.id),
-  ),
-);
 const visibleTasks = computed(() =>
   (view.value === "completed"
     ? store.state.tasks.filter((task) => task.status === "done")
-    : openTasks.value
+    : store.state.tasks
   ).filter(
     (task) =>
       task.title.includes(search.value) &&
@@ -195,7 +195,7 @@ const taskRows = computed(() =>
     taskGroups(visibleTasks.value, (task) => task.id, tasksById.value),
   ),
 );
-const arrangements = computed(() =>
+const todayRecords = computed(() =>
   store.state.arrangements
     .filter((item) => item.date === date.value)
     .flatMap((item) => {
@@ -203,12 +203,29 @@ const arrangements = computed(() =>
       return task || item.recurrence ? [{ ...item, task }] : [];
     }),
 );
+const arrangements = computed(() =>
+  todayRecords.value.flatMap((item) => {
+    const repeats = Boolean(store.recurrences.get(item.taskId));
+    const done = isArrangementDone(item, item.task, repeats);
+    return done || isArrangementPending(item, item.task, repeats)
+      ? [{ ...item, done }]
+      : [];
+  }),
+);
 const pending = computed(() => arrangements.value.filter((item) => !item.done));
 const dueToday = computed(() => unscheduledTasksDue(store.state, date.value));
 const dueTaskIds = computed(
   () => new Set(dueToday.value.map((task) => task.id)),
 );
 const schedulingDueTask = ref(false);
+async function completeDueTask(task: Task, keyboard: boolean) {
+  try {
+    await store.dispatch({ type: "setTaskDone", taskId: task.id, done: true });
+    if (keyboard) await focusStageControl(task.id);
+  } catch {
+    // The workspace displays the failure and reloads the latest data.
+  }
+}
 async function scheduleDueTask(task: Task, keyboard: boolean) {
   if (schedulingDueTask.value) return;
   if (date.value !== localDate()) {
@@ -239,9 +256,9 @@ async function focusStageControl(taskId: string) {
   );
   const target = exact?.getClientRects().length
     ? exact
-    : document.querySelector<HTMLElement>(
-        ".today-plan .focused .check, .today-plan .today-completed summary",
-      );
+    : (document.querySelector<HTMLElement>(
+        ".today-plan .focused .check, .today-due .check, .today-plan .today-completed summary",
+      ) ?? document.querySelector<HTMLElement>(".today-heading h1"));
   target?.focus();
 }
 const todayGroups = computed(() =>
@@ -299,7 +316,7 @@ const upcomingRepeatDays = computed(() => {
   );
 });
 const completed = computed(() =>
-  arrangements.value.filter((item) => item.done),
+  todayRecords.value.filter((item) => item.done),
 );
 const completedTodayIds = computed(
   () => new Set(completed.value.map((item) => item.taskId)),
@@ -634,7 +651,7 @@ async function energy(event: Event) {
           @click="view = 'all'"
         >
           <ListTodo :size="18" /><span v-if="!sidebarCollapsed"
-            >所有任务<span>{{ openTasks.length }}</span></span
+            >所有任务<span>{{ store.state.tasks.length }}</span></span
           ></button
         ><button
           :class="{ active: view === 'completed' }"
@@ -692,7 +709,7 @@ async function energy(event: Event) {
                   })
                 }}
               </p>
-              <h1>今天，留一点余地。</h1>
+              <h1 tabindex="-1">今天，留一点余地。</h1>
               <p class="subtitle">把重要的事往前推，也给自己一点空间。</p>
             </div>
             <div class="page-actions">
@@ -823,7 +840,12 @@ async function energy(event: Event) {
               @moved="moved"
             />
             <p v-else class="today-finished" role="status">
-              <CircleCheck :size="18" /> 今日安排已全部完成
+              <CircleCheck :size="18" />
+              {{
+                dueToday.length
+                  ? `已安排的事项均已完成，另有 ${dueToday.length} 项预计今天完成`
+                  : "今日安排已全部完成"
+              }}
             </p>
             <section
               v-if="remaining.length"
@@ -857,7 +879,7 @@ async function energy(event: Event) {
             </section>
             <details v-if="completedGroups.length" class="today-completed">
               <summary>
-                已完成的今日阶段 <span>{{ completedGroupCount }} 项</span>
+                今日已完成 <span>{{ completedGroupCount }} 项</span>
               </summary>
               <TaskCard
                 v-for="{ item, subtasks } in completedGroups"
@@ -882,6 +904,15 @@ async function energy(event: Event) {
             </div>
             <ul>
               <li v-for="task in dueToday" :key="task.id">
+                <button
+                  class="check"
+                  type="button"
+                  :aria-label="`完成任务：${task.title}`"
+                  :aria-pressed="false"
+                  @click="completeDueTask(task, $event.detail === 0)"
+                >
+                  <Square :size="17" />
+                </button>
                 <button class="task-name" type="button" @click="edit(task)">
                   {{ task.title }}
                 </button>
@@ -1044,7 +1075,12 @@ async function energy(event: Event) {
               >
                 重要性 · {{ importanceLabels[task.importance] }}
               </span>
-              <small v-if="view === 'all' && completedTodayIds.has(task.id)"
+              <small
+                v-if="task.status === 'done' && !store.recurrences.get(task.id)"
+                >{{ statusLabels.done }}</small
+              >
+              <small
+                v-else-if="view === 'all' && completedTodayIds.has(task.id)"
                 >今日阶段已完成</small
               >
               <small
@@ -1092,6 +1128,7 @@ async function energy(event: Event) {
               :key="item.taskId"
               :task="item.task"
               :arrangement="item"
+              stage-record
               @edit="edit"
               @occurrence="openOccurrence"
             />

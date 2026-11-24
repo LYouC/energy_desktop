@@ -19,7 +19,7 @@
 
 用户消息先独立保存。服务读取最新任务、能量、背景、当前会话记忆与待接受方案，用真实 user/assistant 轮次传递近期对话。模型通过 `readTask` 查询任务、`readConversation` 向前翻阅同会话历史、`calculateCapacity` 核算时间。
 
-「一键优化」通过 `sendAgent` 的 `source: "optimizeToday"` 标记请求。用户消息保留已有草稿，`prepareTurn` 拒绝直接执行业务动作，并通过工具回执交给模型修正。开发版可在模型服务的传输入口捕获实际 JSON 请求体，包含系统指令、工作区上下文、消息、工具定义及后续步骤的回执。
+「一键优化」通过 `sendAgent` 的 `source: "optimizeToday"` 标记请求。上下文同时包含当天安排 `today` 与预计今天完成的未安排任务 `dueToday`。用户消息保留已有草稿，`prepareTurn` 拒绝直接执行业务动作，并通过工具回执交给模型修正。部分推进通过 `split.children[].todayScope` 提议新子任务的当天安排，接受后可独立完成。开发版可在模型服务的传输入口捕获实际 JSON 请求体，包含系统指令、工作区上下文、消息、工具定义及后续步骤的回执。
 
 每轮构建上下文时读取操作系统本地时间，将 `YYYY-MM-DD HH:mm` 写入 `context.time` 和系统指令。Agent 直接使用本轮时间回答当前日期和钟点，安排使用工作区日期及 `calendar` 锚点。离线 SDK 测试核对决策和终答都收到同一时间，B10 校验真实模型的回复。
 

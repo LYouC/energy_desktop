@@ -46,6 +46,8 @@ export function taskProgressForDate(
   arrangement: Arrangement | undefined,
   repeats: boolean,
 ) {
+  if (!repeats && task.status === "done")
+    return { done: true, label: statusLabels.done };
   if (arrangement)
     return {
       done: arrangement.done,

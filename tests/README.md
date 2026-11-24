@@ -4,15 +4,15 @@
 
 ## 运行
 
-| 命令                                   | 用途                                                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `npm test`                             | 运行业务、SQLite、Agent 编排、界面状态和配色回归。                                                   |
-| `npm run test:desktop`                 | 构建并运行 Electron 桌面回归，使用隔离工作区和本地 Agent 测试传输。                                  |
-| `npm run test:desktop:today`           | 构建并运行今日安排与重复任务的定向桌面回归。                                                         |
-| `node tests/review.desktop.mjs`        | 对已构建的应用运行独立桌面审查场景。                                                                 |
-| `node tests/agent-ui.desktop.mjs`      | 对已构建的应用验证配置恢复、流式、取消、重试和会话交互，使用本地测试传输。                           |
-| `node tests/agent-context.desktop.mjs` | 通过模拟模型传输核对一键优化的空状态、首轮发送、草稿保留、方案保护，以及调试界面实发请求和会话隔离。 |
-| `node tests/pack.smoke.mjs`            | 验证生成的 Windows 目录包启动、Agent IPC、SQLite 和凭据隔离。                                        |
+| 命令                                   | 用途                                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm test`                             | 运行业务、SQLite、Agent 编排、界面状态和配色回归。                                                                                         |
+| `npm run test:desktop`                 | 构建并运行 Electron 桌面回归，使用隔离工作区和本地 Agent 测试传输。                                                                        |
+| `npm run test:desktop:today`           | 构建并运行今日安排与重复任务的定向桌面回归。                                                                                               |
+| `node tests/review.desktop.mjs`        | 对已构建的应用运行独立桌面审查场景。                                                                                                       |
+| `node tests/agent-ui.desktop.mjs`      | 对已构建的应用验证配置恢复、流式、取消、重试和会话交互，使用本地测试传输。                                                                 |
+| `node tests/agent-context.desktop.mjs` | 通过模拟模型传输核对一键优化的空状态、仅有预计今天完成任务时首轮发送、草稿保留、接受方案后子任务独立完成，以及调试界面实发请求和会话隔离。 |
+| `node tests/pack.smoke.mjs`            | 验证生成的 Windows 目录包启动、Agent IPC、SQLite 和凭据隔离。                                                                              |
 
 桌面脚本通过 `XIXU_DATA_DIR` 使用隔离临时目录，截图及结果写入 Git 忽略的 `test-results/`。受限环境启动 Electron 时可能需要允许本地子进程。
 
@@ -43,6 +43,12 @@
 ## 任务调整卡验证
 
 [Agent 领域测试](agent-domain.test.ts)覆盖 A18 改期与预计完成日期联动、整卡拒绝、校验失败后的 SQLite 回滚、重复接受，以及 A06 的跨任务独立确认。[工作区测试](workspace.test.ts)覆盖旧方案状态和确认范围迁移。[对话桌面测试](agent-ui.desktop.mjs)核对移期方向、理由和按钮数量，以及接受后的实际保存结果。
+
+## 今日安排与预计完成验证
+
+[今日桌面脚本](today.desktop.mjs)覆盖 A19 的两区完成提示、预计区键盘勾选和「所有任务」状态同步，以及 A21 的未安排后代完成与旧阶段恢复。[任务字段测试](task-fields.test.ts)验证重复实例及旧安排继续保留。[Agent 领域测试](agent-domain.test.ts)和 [Agent 上下文桌面脚本](agent-context.desktop.mjs)覆盖 A20 的两区输入、仅有预计完成任务时发起优化、拒绝与跨日拒绝、接受后才创建子任务并安排，以及单独完成子任务。
+
+真实模型连续场景的断言已改为检查拆分内的当天安排及子任务整体状态。该场景仍待使用真实模型复验。
 
 ## 真实模型验证
 

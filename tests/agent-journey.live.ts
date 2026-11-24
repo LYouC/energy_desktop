@@ -127,11 +127,15 @@ await run(
       ),
     );
     assert(
-      next.proposals.some((p) =>
-        p.cards.some(
+      next.proposals.some((proposal) =>
+        proposal.cards.some(
           (card) =>
             card.status === "pending" &&
-            card.changes.some((change) => change.type === "schedule"),
+            card.changes.some(
+              (change) =>
+                change.type === "split" &&
+                change.children.some((child) => child.todayScope),
+            ),
         ),
       ),
     );
@@ -147,7 +151,7 @@ if (parentId) {
       const today = next.arrangements.filter((a) => a.date === localDate());
       assert.equal(today.length, 1);
       const task = next.tasks.find((t) => t.id === today[0].taskId)!;
-      assert(task.id === parentId || task.parentId === parentId);
+      assert.equal(task.parentId, parentId);
       assert.match(today[0].scope + task.title, /提纲|大纲/);
     },
   );
@@ -204,9 +208,17 @@ if (parentId) {
         /三个|3个|3 个/,
         "前轮应已将今日范围改为三个问题",
       );
-      assert(
-        next.arrangements.some((a) => a.date === localDate() && a.done),
-        "本轮三个问题阶段应标记完成",
+      const completedToday = next.arrangements.find(
+        (a) => a.date === localDate(),
+      );
+      const finished = next.tasks.find(
+        (task) => task.id === completedToday?.taskId,
+      );
+      assert.notEqual(finished?.id, parentId);
+      assert.equal(
+        finished?.status,
+        "done",
+        "本轮列出三个问题的子任务应标记完成",
       );
       const recorded = next.tasks.map((t) => t.description).join(" ");
       assert.match(recorded, /问题/);

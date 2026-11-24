@@ -30,6 +30,29 @@ function findTask(state: State, id: string) {
   if (!task) throw new Error("任务已被删除，请刷新后重试。");
   return task;
 }
+export function isTaskOpen(task: Task) {
+  return task.status !== "done" && task.status !== "abandoned";
+}
+
+export function isArrangementDone(
+  item: Arrangement,
+  task?: Task,
+  repeats = Boolean(task?.recurrence),
+) {
+  return item.done || (!item.recurrence && !repeats && task?.status === "done");
+}
+
+export function isArrangementPending(
+  item: Arrangement,
+  task?: Task,
+  repeats = Boolean(task?.recurrence),
+) {
+  return (
+    !isArrangementDone(item, task, repeats) &&
+    (Boolean(item.recurrence) || repeats || task?.status !== "abandoned")
+  );
+}
+
 export function unscheduledTasksDue(state: State, date: string) {
   const recurrences = effectiveRecurrences(state.tasks);
   const planned = new Set(
@@ -42,11 +65,26 @@ export function unscheduledTasksDue(state: State, date: string) {
   return state.tasks.filter(
     (task) =>
       task.expectedDate === date &&
-      task.status !== "done" &&
-      task.status !== "abandoned" &&
+      isTaskOpen(task) &&
       !recurrences.get(task.id) &&
       !planned.has(task.id),
   );
+}
+
+function setTaskDone(state: State, taskId: string, done: boolean, now: string) {
+  const task = findTask(state, taskId);
+  const recurrences = effectiveRecurrences(state.tasks);
+  if (recurrences.get(taskId)) throw new Error("请完成或恢复当天的重复实例。");
+  if (task.status === "abandoned") throw new Error("请先恢复已放弃的任务。");
+  if ((task.status === "done") === done) return;
+  const ids = done ? taskSubtreeIds(state.tasks, [taskId]) : new Set([taskId]);
+  for (const member of state.tasks) {
+    if (!ids.has(member.id) || recurrences.get(member.id)) continue;
+    if (done ? !isTaskOpen(member) : member.status !== "done") continue;
+    member.status = done ? "done" : "todo";
+    member.version++;
+    member.updatedAt = now;
+  }
 }
 function checkRelations(tasks: Task[]) {
   for (const task of tasks) {
@@ -562,6 +600,9 @@ export function applyCommand(
     case "deleteTask":
       deleteTask(state, command.id);
       break;
+    case "setTaskDone":
+      setTaskDone(state, command.taskId, command.done, now);
+      break;
     case "schedule":
       schedule(state, command.taskId, command.date, command.scope);
       break;
@@ -760,7 +801,14 @@ export function applyCommand(
           );
         } else {
           const parent = findTask(state, change.taskId);
-          for (const child of change.children) {
+          for (const { todayScope, ...child } of change.children) {
+            if (
+              todayScope &&
+              (change.date !== date || recurrences.get(parent.id))
+            )
+              throw new Error(
+                "只能将普通任务拆出的子任务安排到原建议当天，请重新分析。",
+              );
             const task = {
               ...newTask(parent.id),
               ...child,
@@ -769,6 +817,7 @@ export function applyCommand(
             };
             checkDates(task);
             state.tasks.push(task);
+            if (todayScope) schedule(state, task.id, date, todayScope);
           }
           parent.version++;
           synchronizeRecurrence(state, date);

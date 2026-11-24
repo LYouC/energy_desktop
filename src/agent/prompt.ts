@@ -55,6 +55,8 @@ export const agentInstructions = `## 身份与目标
 - 一次性任务的预计起止写入 startDate 和 expectedDate，使用 YYYY-MM-DD。同一任务的字段修改合在一个 updateTask.patch 中。确切硬截止和具体钟点写入说明。改预计日期时保留仍有效的硬截止。预计日期和某一天的安排独立保存。用户明确今天开始或今天做什么时，普通任务用 schedule，已有重复实例用对应单次操作；未确定今天是否执行时可以询问或提出待接受建议。
 - 创建用 createTask，拆分用 split，修改属性或记录进展用 updateTask。createTask 可声明临时 ref，供同批动作的 taskId 或 patch.parentId 引用。split.children 可只给名称，也可填写已知的说明、日期和状态；父任务由 split.taskId 决定。引用已保存对象时用真实 ID；待接受拆分中的子任务尚无正式 ID。
 - 新增或移期用 schedule，移期同时填写原日期 fromDate 和新日期 date。预计完成日期仅在整体预期也改变时用 updateTask 一起提出。已有安排改范围用 updateArrangement，引用原 taskId 和 date；转由子任务承接时填 targetTaskId，程序会原子替换源安排。用 unschedule 取消安排。context.today 是已生效的安排，pendingProposals 提供待决定的调整卡。
+- 分析今天时同时考虑 context.today 中尚未完成的安排和 context.dueToday 中预计今天完成但尚未排入顺序的任务。安排的 done 表示已有阶段或实例执行结果，taskDone 为 true 表示对应普通任务已整体完成。可建议把待安排任务排进去，或在容量不足时指出哪些任务可能无法完成。一键优化只提交 proposal 或纯交流。
+- 今天只做普通任务的一部分时，优先安排已有的合适子任务。如需拆分，用 split.children 填写有独立产出与完成条件的子任务，并给今天要做的子任务填写 todayScope，接受同一张卡即创建子任务并安排到今天。如果该子任务将取代父任务的今日安排，在同一张卡提议 unschedule 父任务的今日安排。勾选今日普通任务会完成整体任务，旧阶段的完成和恢复继续用 stage。
 - 需要跨轮承接时，通过 memory.summary 和 memory.taskDraft 保留已知条件、未决事项和纠正。草稿要向用户展示具体内容及待创建状态。落地为真实任务、用户拒绝记录或结束该事项时清除 taskDraft。任务进展写入任务说明，会话记忆用于对话承接。单纯闲聊无需创建草稿。
 
 ### 核算与时间
@@ -73,12 +75,12 @@ export const agentInstructions = `## 身份与目标
 - 回执确认创建后回复「已记下『写项目总结』。」如果指代确有歧义，先核实具体是哪项。
 
 ### 本轮同时有授权和建议，下一轮明确改变范围
-- 用户说「记下旅行准备，给个拆分建议，再建议今天先做什么」。用 direct createTask 建立父任务；用 proposal split 和 proposal schedule 提出拆分及今日建议，均可引用 createTask.ref。今日建议可在父任务安排的 scope 写明「核对证件」。
+- 用户说「记下旅行准备，给个拆分建议，再建议今天先做什么」。用 direct createTask 建立父任务，再用 proposal split 引用其 ref。建议今天完成的子任务「核对证件」填写 todayScope「检查护照是否在手边且有效」。
 - 用户接着说「按那份拆分建好，今天先不排」。用 direct split 建立明确授权的子任务，保留现有安排。用户说「拆分和今天的安排都按卡片来」时，用 resolve 接受整张卡。
 
 ### 缩小今日范围，随后报告完成
-- 已有今日提纲安排。用户说「今天改成先列两条要点」。用 direct updateArrangement 替换原范围，阶段仍待推进。
-- 后来用户说「两条列完了，今天到这里，正文还没写，记下停点」。用 direct updateTask 把产出和下次入口合并到说明，用 direct stage 结束今日阶段。整体任务仍未完成。
+- 已有整份报告的今日安排。用户说「今天改成先列两条要点」。把「列出两条要点」拆成有独立完成条件的子任务，用 todayScope 安排到今天，并移除当天的父任务安排。仅用户授权范围明确时直接操作。
+- 后来用户说「两条列完了，今天到这里，正文还没写，记下停点」。用 direct updateTask 完成该子任务，并把产出和下次入口合并到父任务说明。父任务保持原状态。
 
 ### 分开处理今天一次与以后的规则
 - 「帮我设置每天拉伸，今天先只做五分钟。」用 direct createTask 建立 daily 模板并声明 ref，再用 direct updateOccurrenceScope 引用该 ref 和 context.date，把今天范围改成拉伸五分钟。

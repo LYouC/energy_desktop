@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { emptyState, newTask } from "../src/domain/model";
-import { applyCommand, unscheduledTasksDue } from "../src/domain/operations";
+import {
+  applyCommand,
+  isArrangementPending,
+  unscheduledTasksDue,
+} from "../src/domain/operations";
 import { WorkspaceDatabase } from "../src/persistence/storage";
 import { buildContext } from "../src/agent/context";
 import { agentTurnSchema, applyAgentTurn } from "../src/agent/turn";
@@ -153,6 +157,101 @@ test("仍有当天移除记录的子任务不会从预计完成入口重复安�
   );
   assert.deepEqual(next.arrangements, state.arrangements);
   assert.deepEqual(next.skippedOccurrences, state.skippedOccurrences);
+});
+
+test("A21 整体完成覆盖各层一次性子任务，保留旧阶段与重复实例", () => {
+  const date = "2026-11-23";
+  const parent = { ...newTask(), title: "准备行程" };
+  const child = { ...newTask(parent.id), title: "订票", expectedDate: date };
+  const grandchild = { ...newTask(child.id), title: "核对目的地" };
+  const repeat = {
+    ...newTask(parent.id),
+    title: "每日查票",
+    recurrence: { type: "daily" as const },
+  };
+  let state = emptyState();
+  for (const task of [parent, child, grandchild, repeat])
+    state = applyCommand(state, { type: "saveTask", task }, date);
+  for (const task of [parent, child])
+    state = applyCommand(
+      state,
+      { type: "schedule", taskId: task.id, date, scope: task.title },
+      date,
+    );
+  const complete = {
+    type: "setTaskDone",
+    taskId: parent.id,
+    done: true,
+  } as const;
+  const completed = applyCommand(state, complete, date);
+  assert.deepEqual(
+    completed.tasks.map((task) => task.status),
+    ["done", "done", "done", "todo"],
+  );
+  assert.deepEqual(completed.arrangements, state.arrangements);
+  assert.deepEqual(unscheduledTasksDue(completed, date), []);
+  const context = buildContext(completed, state.activeSessionId, date);
+  assert.deepEqual(
+    context.today.map((item) => [item.done, "taskDone" in item]),
+    [
+      [false, false],
+      [false, true],
+      [false, true],
+    ],
+  );
+  const restored = applyCommand(completed, { ...complete, done: false }, date);
+  assert.deepEqual(
+    restored.tasks.map((task) => task.status),
+    ["todo", "done", "done", "todo"],
+  );
+  assert.deepEqual(restored.arrangements, state.arrangements);
+});
+
+test("普通任务继承未来重复后，今天的临时安排仍可独立完成和恢复", () => {
+  const date = "2026-11-23";
+  const parent = { ...newTask(), title: "练习" };
+  const child = { ...newTask(parent.id), title: "朗读" };
+  let state = emptyState();
+  for (const task of [parent, child])
+    state = applyCommand(state, { type: "saveTask", task }, date);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: child.id, date, scope: child.title },
+    date,
+  );
+  state = applyCommand(
+    state,
+    { type: "setTaskDone", taskId: child.id, done: true },
+    date,
+  );
+  state = applyCommand(
+    state,
+    {
+      type: "saveTask",
+      task: {
+        ...state.tasks[0],
+        recurrence: { type: "weekly", weekdays: [2] },
+      },
+    },
+    date,
+  );
+  assert.equal(state.arrangements[0].recurrence, undefined);
+  assert.equal(
+    isArrangementPending(state.arrangements[0], state.tasks[1], true),
+    true,
+  );
+  const stage = { type: "stage", taskId: child.id, date, done: true } as const;
+  const finished = applyCommand(state, stage, date);
+  assert.equal(
+    isArrangementPending(finished.arrangements[0], finished.tasks[1], true),
+    false,
+  );
+  const restored = applyCommand(finished, { ...stage, done: false }, date);
+  assert.equal(
+    isArrangementPending(restored.arrangements[0], restored.tasks[1], true),
+    true,
+  );
+  assert.equal(restored.tasks[1].status, "done");
 });
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {
