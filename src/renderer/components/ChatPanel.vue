@@ -29,6 +29,7 @@ import { buildContext } from "../../agent/context";
 import {
   localDate,
   statusLabels,
+  type AdjustmentCard,
   type Change,
   type Proposal,
 } from "../../domain/model";
@@ -256,17 +257,23 @@ async function optimizeToday() {
     "optimizeToday",
   );
 }
-async function resolve(proposal: Proposal, changes: Change[], accept: boolean) {
+async function resolve(
+  proposal: Proposal,
+  card: AdjustmentCard,
+  accept: boolean,
+) {
   resolveError.value = "";
   try {
     await store.dispatch({
       type: "resolve",
       proposalId: proposal.id,
-      ids: changes.map((change) => change.id),
+      cardIds: [card.id],
       accept,
     });
   } catch {
-    resolveError.value = "方案变更未能保存，请重试。";
+    resolveError.value = accept
+      ? "这张调整卡未能应用。请重新分析后再接受。"
+      : "拒绝结果未能保存，请重试。";
   }
 }
 async function switchSession(id: string) {
@@ -292,28 +299,56 @@ function inspectContext() {
 function newSession() {
   switchSession(crypto.randomUUID());
 }
-function proposalStatus(proposal: Proposal) {
-  const accepted = proposal.changes.filter(
-    (change) => change.status === "accepted",
-  ).length;
-  if (accepted === proposal.changes.length) return "已全部接受";
-  if (accepted) return "部分接受";
-  return proposal.changes.some((change) => change.status === "pending")
-    ? "待接受"
-    : "已拒绝";
+function cardSummaries(card: AdjustmentCard) {
+  const patch: NonNullable<Change["patch"]> = Object.assign(
+    {},
+    ...card.changes
+      .filter((change) => change.type === "update")
+      .map((change) => change.patch),
+  );
+  const removals = card.changes.filter(
+    (change) => change.type === "unschedule",
+  );
+  const schedules = card.changes.filter((change) => change.type === "schedule");
+  const [removal] = removals;
+  const [schedule] = schedules;
+  const move =
+    removals.length === 1 &&
+    schedules.length === 1 &&
+    !schedule.fromDate &&
+    removal.date !== schedule.date;
+  const summaries = card.changes
+    .filter(
+      (change) => change.type !== "update" && !(move && change === removal),
+    )
+    .map((change) =>
+      changeSummary(
+        move && change === schedule
+          ? {
+              ...change,
+              fromDate: removal.date,
+              originalScope: removal.originalScope,
+            }
+          : change,
+      ),
+    );
+  return [...summaries, ...fieldSummaries(patch, card.previousExpectedDate)];
 }
 function changeSummary(change: Change) {
   switch (change.type) {
     case "updateRecurrence":
-      return change.recurrence ? recurrenceLabel(change.recurrence) : "";
+      return change.recurrence
+        ? `重复规则 · ${recurrenceLabel(change.recurrence)}`
+        : "";
     case "deleteRecurringTask": {
       const children = change.descendantIds?.length ?? 0;
       const scope = children ? `同时删除 ${children} 项子任务。 ` : "";
       return `${scope}停止生成新实例，保留已生成的重复记录。`;
     }
     case "createOccurrence":
+      return `补加 ${change.date} · ${change.scope}`;
     case "updateOccurrenceScope":
-      return `${change.date} · ${change.scope}`;
+      return `调整 ${change.date} 的范围 · ${change.scope}`;
     case "setOccurrenceDone":
       return `${change.date} · ${change.done ? "完成这次" : "恢复为未完成"}${completionDetails(change)}`;
     case "skipOccurrence":
@@ -321,13 +356,38 @@ function changeSummary(change: Change) {
     case "restoreOccurrence":
       return `${change.date} · 恢复当天安排`;
   }
-  if (change.type === "schedule")
-    return `${change.fromDate ? `${change.fromDate} → ` : ""}${change.date} · ${change.scope}`;
+  if (change.type === "schedule") {
+    const originalScope =
+      change.originalScope && change.originalScope !== change.scope
+        ? ` · ${change.originalScope}`
+        : "";
+    const target = `${change.date} · ${change.scope}`;
+    if (change.fromTaskId && change.fromTaskId !== change.taskId) {
+      const source =
+        change.fromTaskTitle ??
+        store.state.tasks.find((task) => task.id === change.fromTaskId)
+          ?.title ??
+        "原任务";
+      const destination = change.targetTaskTitle
+        ? `「${change.targetTaskTitle}」`
+        : "";
+      return `改派：「${source}」${change.fromDate ?? change.date}${originalScope} → ${destination}${target}`;
+    }
+    if (change.fromDate && change.fromDate !== change.date)
+      return `${change.fromDate}${originalScope} → ${target}`;
+    return target;
+  }
   if (change.type === "split")
-    return change.children.map((child) => child.title).join(" → ");
+    return `拆分为 ${change.children.map((child) => child.title).join("、")}`;
   if (change.type === "unschedule") return `取消 ${change.date} 的安排`;
   if (change.type === "stage")
     return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}${completionDetails(change)}`;
+  return "";
+}
+function fieldSummaries(
+  patch: NonNullable<Change["patch"]>,
+  previousExpectedDate?: string,
+) {
   const fields: Record<string, string> = {
     title: "名称",
     status: "状态",
@@ -336,13 +396,20 @@ function changeSummary(change: Change) {
     description: "说明",
     parentId: "所属任务",
   };
-  return Object.entries(change.patch ?? {})
+  return Object.entries(patch)
     .filter(([key]) => fields[key])
-    .map(
-      ([key, value]) =>
-        `${fields[key]}：${key === "status" ? statusLabels[value as keyof typeof statusLabels] : String(value || "清空")}`,
-    )
-    .join("；");
+    .map(([key, value]) => {
+      if (key === "expectedDate" && previousExpectedDate !== undefined)
+        return `预计完成：${previousExpectedDate || "未设置"} → ${value || "未设置"}`;
+      const display =
+        key === "status"
+          ? statusLabels[value as keyof typeof statusLabels]
+          : key === "parentId" && value
+            ? (store.state.tasks.find((task) => task.id === value)?.title ??
+              value)
+            : value || "清空";
+      return `${fields[key]}：${display}`;
+    });
 }
 function completionDetails(change: Change) {
   const count = change.descendantIds?.length ?? 0;
@@ -464,46 +531,35 @@ onBeforeUnmount(() => {
             :key="proposal.id"
           >
             <section class="proposal">
-              <h3>规划方案 · {{ proposalStatus(proposal) }}</h3>
-              <div
-                v-for="change in proposal.changes"
-                :key="change.id"
+              <section
+                v-for="card in proposal.cards"
+                :key="card.id"
                 class="proposal-change"
               >
-                <strong>{{ change.label }}</strong>
-                <p>{{ changeSummary(change) }}</p>
-                <p class="muted">{{ change.reason }}</p>
+                <h3>{{ card.title }}</h3>
+                <p v-for="(summary, index) in cardSummaries(card)" :key="index">
+                  {{ summary }}
+                </p>
+                <p class="muted">{{ card.reason }}</p>
                 <span class="change-status">{{
                   {
                     pending: "待接受",
                     accepted: "已接受 · 已生效",
                     rejected: "已拒绝",
-                  }[change.status]
+                  }[card.status]
                 }}</span>
-                <div v-if="change.status === 'pending'" class="row">
+                <div v-if="card.status === 'pending'" class="row">
                   <Button
                     variant="outline"
-                    @click="resolve(proposal, [change], true)"
-                    >接受这项</Button
+                    @click="resolve(proposal, card, true)"
+                    >接受</Button
                   ><Button
                     variant="ghost"
-                    @click="resolve(proposal, [change], false)"
+                    @click="resolve(proposal, card, false)"
                     >拒绝</Button
                   >
                 </div>
-              </div>
-              <Button
-                v-if="proposal.changes.some((c) => c.status === 'pending')"
-                variant="outline"
-                @click="
-                  resolve(
-                    proposal,
-                    proposal.changes.filter((c) => c.status === 'pending'),
-                    true,
-                  )
-                "
-                >接受其余变更</Button
-              >
+              </section>
             </section>
           </template>
         </div>

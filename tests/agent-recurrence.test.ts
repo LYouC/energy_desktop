@@ -100,10 +100,12 @@ test("模板编辑不会使原实例方案过期，父项完成方案复核当�
     type: "resolve",
     mode: direct,
     proposalId: plan.id,
-    ids: [plan.changes[0].id],
+    cardIds: [plan.cards[0].id],
     accept: true,
   } as const;
-  const updated = turn(renamed, [{ ...applyPlan, ids: [...applyPlan.ids] }]);
+  const updated = turn(renamed, [
+    { ...applyPlan, cardIds: [...applyPlan.cardIds] },
+  ]);
   assert.equal(updated.arrangements[0].scope, "只做五分钟");
   assert.equal(updated.arrangements[0].recurrence?.title, "拉伸");
   const doneProposal = turn(updated, [
@@ -127,7 +129,7 @@ test("模板编辑不会使原实例方案过期，父项完成方案复核当�
         {
           ...applyPlan,
           proposalId: completion.id,
-          ids: [completion.changes[0].id],
+          cardIds: [completion.cards[0].id],
         },
       ]),
     /子任务的今日完成范围已变化/,
@@ -319,7 +321,7 @@ test("删除模板保留历史及今天实例，且仍可调整、完成、移�
         type: "resolve",
         mode: direct,
         proposalId: plan.id,
-        ids: [plan.changes[0].id],
+        cardIds: [plan.cards[0].id],
         accept: true,
       },
     ],
@@ -333,7 +335,7 @@ test("删除模板保留历史及今天实例，且仍可调整、完成、移�
   );
 });
 
-test("待接受方案可部分接受，过期或同日手动变更后旧实例方案不生效", () => {
+test("规则和当天实例同卡生效，实例过期时整卡失败", () => {
   const original = withDailyTask();
   const taskId = original.tasks[0].id;
   const suggested = turn(original, [
@@ -348,31 +350,23 @@ test("待接受方案可部分接受，过期或同日手动变更后旧实例�
   assert.deepEqual(suggested.tasks, original.tasks);
   assert.deepEqual(suggested.arrangements, original.arrangements);
   const plan = suggested.proposals.at(-1)!;
-  const [changeRule, skip] = plan.changes;
-  const accepted = turn(suggested, [
-    {
-      type: "resolve",
-      mode: direct,
-      proposalId: plan.id,
-      ids: [changeRule.id],
-      accept: true,
-    },
-  ]);
+  assert.equal(plan.cards.length, 1);
+  const accept = {
+    type: "resolve" as const,
+    mode: direct,
+    proposalId: plan.id,
+    cardIds: [plan.cards[0].id],
+    accept: true,
+  };
+  const accepted = turn(suggested, [accept]);
   assert.deepEqual(accepted.tasks[0].recurrence, {
     type: "weekly",
     weekdays: [5],
   });
-  assert.equal(accepted.arrangements.length, 1);
-  const acceptSkip = {
-    type: "resolve" as const,
-    mode: direct,
-    proposalId: plan.id,
-    ids: [skip.id],
-    accept: true,
-  };
-  assert.throws(() => turn(accepted, [acceptSkip], tomorrow), /日期已变化/);
+  assert.equal(accepted.arrangements.length, 0);
+  assert.throws(() => turn(suggested, [accept], tomorrow), /日期已变化/);
   const edited = applyCommand(
-    accepted,
+    suggested,
     {
       type: "updateOccurrenceScope",
       taskId,
@@ -381,9 +375,9 @@ test("待接受方案可部分接受，过期或同日手动变更后旧实例�
     },
     today,
   );
-  assert.throws(() => turn(edited, [acceptSkip]), /任务已变化/);
-  assert.equal(edited.proposals.at(-1)?.changes[1].status, "pending");
-  assert.equal(edited.arrangements[0].scope, "拉伸十分钟");
+  assert.throws(() => turn(edited, [accept]), /任务已变化/);
+  assert.equal(edited.proposals.at(-1)?.cards[0].status, "pending");
+  assert.deepEqual(edited.tasks[0].recurrence, original.tasks[0].recurrence);
 });
 
 test("删除模板需要覆盖子任务的明确范围，新增后代使旧建议失效", () => {
@@ -414,7 +408,7 @@ test("删除模板需要覆盖子任务的明确范围，新增后代使旧建�
       type: "resolve",
       mode: direct,
       proposalId: plan.id,
-      ids: [plan.changes[0].id],
+      cardIds: [plan.cards[0].id],
       accept: true,
     },
   ] satisfies AgentTurn["actions"];
@@ -455,7 +449,7 @@ test("Agent 拆分重复父任务时，子任务在本轮按同一规则生成�
   );
 });
 
-test("只接受模板删除时，当天实例建议仍待接受并可单独执行", () => {
+test("删除模板与改其当天实例同卡执行，子任务的实例仍可单独处理", () => {
   const original = withDailyTask();
   const taskId = original.tasks[0].id;
   const child = {
@@ -495,20 +489,18 @@ test("只接受模板删除时，当天实例建议仍待接受并可单独执�
     type: "resolve",
     mode: direct,
     proposalId: plan.id,
-    ids: [plan.changes[index].id],
+    cardIds: [plan.cards[index].id],
     accept: true,
   });
   const deleted = turn(suggested, [resolve(0)]);
   assert.deepEqual(deleted.tasks, []);
-  assert.equal(deleted.arrangements[0].scope, "拉伸");
+  assert.equal(deleted.arrangements[0].scope, "拉伸十分钟");
   assert.deepEqual(
-    deleted.proposals.at(-1)?.changes.map((change) => change.status),
-    ["accepted", "pending", "pending"],
+    deleted.proposals.at(-1)?.cards.map((card) => card.status),
+    ["accepted", "pending"],
   );
-  const updated = turn(deleted, [resolve(1)]);
-  assert.equal(updated.arrangements[0].scope, "拉伸十分钟");
   assert.equal(
-    turn(updated, [resolve(2)]).arrangements[1].scope,
+    turn(deleted, [resolve(1)]).arrangements[1].scope,
     "肩部活动三分钟",
   );
 
@@ -517,7 +509,7 @@ test("只接受模板删除时，当天实例建议仍待接受并可单独执�
     { type: "deleteTask", id: taskId },
     today,
   );
-  assert.equal(manuallyDeleted.proposals.at(-1)?.changes[1].status, "pending");
+  assert.equal(manuallyDeleted.proposals.at(-1)?.cards[1].status, "pending");
   assert.throws(() => turn(manuallyDeleted, [resolve(1)]), /任务已变化/);
 });
 
@@ -581,24 +573,19 @@ test("方案转为重复模板后，旧预计日期变更无法写入", () => {
     },
   ]);
   const plan = suggested.proposals.at(-1)!;
-  const accept = (ids: string[]): AgentTurn["actions"][number] => ({
+  const accept: AgentTurn["actions"][number] = {
     type: "resolve",
     mode: direct,
     proposalId: plan.id,
-    ids,
+    cardIds: [plan.cards[0].id],
     accept: true,
-  });
-  const [rule, date] = plan.changes;
+  };
   assert.throws(
-    () => turn(suggested, [accept([rule.id, date.id])]),
+    () => turn(suggested, [accept]),
     /重复任务使用规则表达起止日期/,
   );
   assert.equal(suggested.tasks[0].recurrence, undefined);
-  const repeating = turn(suggested, [accept([rule.id])]);
-  assert.throws(
-    () => turn(repeating, [accept([date.id])]),
-    /重复任务使用规则表达起止日期/,
-  );
+  const repeating = turn(state, [{ ...ruleAction, mode: direct }]);
   assert.throws(
     () =>
       turn(repeating, [

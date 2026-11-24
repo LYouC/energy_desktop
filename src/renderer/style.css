@@ -1066,19 +1066,19 @@ body.chat-resizing .chat-resizer::after {
   border-radius: 11px 11px 3px 11px;
 }
 .proposal {
+  display: grid;
+  gap: 8px;
+  margin-top: 15px;
+}
+.proposal-change {
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 11px;
   padding: 14px;
-  margin-top: 15px;
 }
-.proposal h3 {
+.proposal-change h3 {
   color: var(--accent);
   margin-bottom: 7px;
-}
-.proposal-change {
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
 }
 .proposal-change p {
   margin-top: 7px;

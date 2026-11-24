@@ -39,6 +39,14 @@ const existingTask = {
       "已保存任务的真实id，或同批createTask声明的ref。任务标题不是id，待接受拆分中的子任务尚无真实id。",
     ),
   ...authorization,
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "待接受建议的具体理由。同任务首个proposal动作填写整张卡的理由，其余动作省略。",
+    ),
 };
 const occurrenceTarget = {
   ...existingTask,
@@ -165,7 +173,7 @@ export const agentActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("resolve"),
     proposalId: z.string(),
-    ids: z.array(z.string()).min(1),
+    cardIds: z.array(z.string()).min(1).describe("待处理的整张调整卡 ID"),
     accept: z.boolean(),
     ...authorization,
   }),
@@ -189,11 +197,44 @@ const recurringChangeLabels: Partial<
   restoreOccurrence: "撤销今日移除",
 };
 
+function consolidateCardChanges(changes: Change[]) {
+  const result: Change[] = [];
+  for (const change of changes) {
+    const previous = result.at(-1);
+    if (previous?.type === "update" && change.type === "update") {
+      previous.patch = { ...previous.patch, ...change.patch };
+    } else if (
+      previous?.type === "schedule" &&
+      change.type === "schedule" &&
+      previous.fromDate &&
+      !previous.fromTaskId &&
+      !change.fromTaskId &&
+      previous.date === change.fromDate &&
+      previous.fromDate !== change.date &&
+      change.originalScope === undefined &&
+      !result.some(
+        (earlier) =>
+          earlier !== previous &&
+          earlier.type === "schedule" &&
+          earlier.taskId === change.taskId &&
+          earlier.date === change.fromDate,
+      )
+    ) {
+      // 中间日期原来没有安排，直接呈现并应用最终移期。
+      previous.date = change.date;
+      previous.scope = change.scope;
+    } else {
+      result.push(change);
+    }
+  }
+  return result;
+}
+
 /** 整轮结果在内存中计算，任何一步失败都会丢弃整份新状态。 */
 export function applyAgentTurn(
   previous: State,
   sessionId: string,
-  userText: string,
+  _userText: string,
   input: unknown,
   replyId: string = crypto.randomUUID(),
   date = localDate(),
@@ -218,8 +259,22 @@ export function applyAgentTurn(
     id: crypto.randomUUID(),
     sessionId,
     createdAt: new Date().toISOString(),
-    changes: [],
+    cards: [],
   };
+  const cardsByTask = new Map<string, Proposal["cards"][number]>();
+  const tasksWithProposals = new Set(
+    turn.actions.flatMap((action) =>
+      action.mode === "proposal" &&
+      "taskId" in action &&
+      !(
+        action.type === "updateArrangement" &&
+        action.targetTaskId &&
+        action.targetTaskId !== action.taskId
+      )
+        ? [action.taskId]
+        : [],
+    ),
+  );
   for (const action of turn.actions) {
     // 应用已持有本轮真实消息，直接记录来源，避免要求模型重抄原话而误拦操作。
     // 意图、否定、指代和接受范围均由模型判断，执行层检查结构与业务一致性。
@@ -258,7 +313,7 @@ export function applyAgentTurn(
       apply({
         type: "resolve",
         proposalId: target.id,
-        ids: action.ids,
+        cardIds: action.cardIds,
         accept: action.accept,
       });
       continue;
@@ -296,6 +351,16 @@ export function applyAgentTurn(
         : sourceId;
       const target = state.tasks.find((item) => item.id === targetId);
       if (!target) throw new Error("替换安排的目标任务不存在。");
+      if (
+        action.mode === "proposal" &&
+        target.id !== sourceId &&
+        action.targetTaskId &&
+        tasksWithProposals.has(action.taskId) &&
+        tasksWithProposals.has(action.targetTaskId)
+      )
+        throw new Error(
+          "改派与两端任务的待定调整有重叠。请先提出改派及其中一端的配套变更，另一端留待后续协商。",
+        );
       task = target;
     }
     const recurrences = effectiveRecurrences(state.tasks);
@@ -316,24 +381,27 @@ export function applyAgentTurn(
       const matching = state.proposals
         .filter((item) => item.sessionId === sessionId)
         .flatMap((item) =>
-          item.changes
-            .filter(
-              (change) =>
+          item.cards
+            .filter(({ taskId, status, changes }) => {
+              const [change] = changes;
+              return (
+                changes.length === 1 &&
+                status === "pending" &&
+                taskId === id &&
                 change.type === "split" &&
-                change.status === "pending" &&
-                change.taskId === id &&
                 change.taskVersion === version &&
                 JSON.stringify(change.children) ===
-                  JSON.stringify(action.children),
-            )
-            .map((change) => ({ proposalId: item.id, changeId: change.id })),
+                  JSON.stringify(action.children)
+              );
+            })
+            .map((card) => ({ proposalId: item.id, cardId: card.id })),
         )
         .at(-1);
       if (matching) {
         apply({
           type: "resolve",
           proposalId: matching.proposalId,
-          ids: [matching.changeId],
+          cardIds: [matching.cardId],
           accept: true,
         });
         continue;
@@ -364,7 +432,6 @@ export function applyAgentTurn(
       taskId: task?.id ?? sourceId,
       taskVersion: task?.version ?? null,
       label: `${label}「${title}」`,
-      reason: `${action.mode === "direct" ? "按用户要求" : "待用户接受的建议"}，本轮原话为${userText}`,
       type:
         action.type === "updateTask"
           ? "update"
@@ -380,7 +447,6 @@ export function applyAgentTurn(
             : "",
       scope: "scope" in action ? action.scope : "",
       children: action.type === "split" ? action.children : [],
-      status: "pending",
       ...(action.type === "updateTask"
         ? { patch: taskPatch(action.patch) }
         : {}),
@@ -401,37 +467,89 @@ export function applyAgentTurn(
           }
         : {}),
     };
-    if (action.mode === "proposal") proposal.changes.push(change);
-    else {
+    // 改派和仅涉及源任务的其他建议一起确认。单独改派归承接任务。
+    const cardTask =
+      action.mode === "proposal" &&
+      action.type === "updateArrangement" &&
+      action.targetTaskId &&
+      tasksWithProposals.has(action.taskId) &&
+      !tasksWithProposals.has(action.targetTaskId)
+        ? sourceTask
+        : task;
+    const card: Proposal["cards"][number] = {
+      id: crypto.randomUUID(),
+      taskId: cardTask?.id ?? change.taskId,
+      title: occurrence?.recurrence?.title ?? cardTask?.title ?? change.label,
+      reason: action.mode === "proposal" ? (action.reason ?? "") : "按用户要求",
+      status: "pending",
+      changes: [change],
+    };
+    if (action.mode === "proposal") {
+      const existing = cardsByTask.get(card.taskId);
+      if (existing) {
+        existing.changes.push(change);
+        if (card.reason && card.reason !== existing.reason)
+          existing.reason = [existing.reason, card.reason]
+            .filter(Boolean)
+            .join("\n");
+      } else {
+        cardsByTask.set(card.taskId, card);
+        proposal.cards.push(card);
+      }
+    } else {
       // 直接操作也复用方案应用器，确保日期、关系、版本与阶段规则一致。
       const immediate: Proposal = {
         ...proposal,
         id: crypto.randomUUID(),
-        changes: [change],
+        cards: [card],
       };
       apply({ type: "proposal", proposal: immediate });
       apply({
         type: "resolve",
         proposalId: immediate.id,
-        ids: [change.id],
+        cardIds: [card.id],
         accept: true,
       });
     }
   }
   // 先完成本轮事实和已授权操作，再给尚未接受的建议绑定最新任务版本。
   const recurrences = effectiveRecurrences(state.tasks);
-  for (const change of proposal.changes) {
-    const task = state.tasks.find((item) => item.id === change.taskId);
-    if (!task && !change.occurrence)
-      throw new Error("建议所引用的任务已在本轮删除，请重新核对。");
-    if (recurrences.get(change.taskId) && change.patch)
-      checkRecurringTaskPatch(change.patch);
-    change.taskVersion = task?.version ?? null;
-    if (change.fromTaskId) {
-      const source = state.tasks.find((item) => item.id === change.fromTaskId);
-      if (!source) throw new Error("原安排所属任务已在本轮删除，请重新核对。");
-      change.fromTaskVersion = source.version;
+  for (const card of proposal.cards) {
+    const cardTask = state.tasks.find((item) => item.id === card.taskId);
+    if (card.changes.some((change) => !change.occurrence))
+      card.title = cardTask?.title ?? card.title;
+    card.previousExpectedDate = cardTask?.expectedDate;
+    for (const change of card.changes) {
+      const task = state.tasks.find((item) => item.id === change.taskId);
+      if (!task && !change.occurrence)
+        throw new Error("建议所引用的任务已在本轮删除，请重新核对。");
+      if (recurrences.get(change.taskId) && change.patch)
+        checkRecurringTaskPatch(change.patch);
+      change.taskVersion = task?.version ?? null;
+      if (change.fromTaskId) {
+        const source = state.tasks.find(
+          (item) => item.id === change.fromTaskId,
+        );
+        if (!source)
+          throw new Error("原安排所属任务已在本轮删除，请重新核对。");
+        change.fromTaskVersion = source.version;
+        if (source.id !== change.taskId) {
+          change.fromTaskTitle = source.title;
+          change.targetTaskTitle = task?.title;
+        }
+      }
+      const originalDate =
+        change.fromDate ??
+        (change.type === "unschedule" ? change.date : undefined);
+      if (originalDate) {
+        const originalTaskId = change.fromTaskId ?? change.taskId;
+        change.originalScope = state.arrangements.find(
+          (item) =>
+            item.taskId === originalTaskId && item.date === originalDate,
+        )?.scope;
+      }
     }
+    card.changes = consolidateCardChanges(card.changes);
   }
   const session = state.sessions.find((item) => item.id === sessionId)!;
   if (turn.memory) session.agentMemory = turn.memory;
@@ -442,14 +560,14 @@ export function applyAgentTurn(
   }
   apply({
     type: "reply",
-    proposal: proposal.changes.length ? proposal : null,
+    proposal: proposal.cards.length ? proposal : null,
     message: {
       id: replyId,
       sessionId,
       role: "assistant",
       text: turn.text,
       createdAt: new Date().toISOString(),
-      ...(proposal.changes.length ? { proposalId: proposal.id } : {}),
+      ...(proposal.cards.length ? { proposalId: proposal.id } : {}),
     },
   });
   return state;

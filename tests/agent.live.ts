@@ -93,7 +93,7 @@ let state = await run(
     assert.equal(next.tasks.length, 1);
     assert.equal(next.arrangements.length, 0);
     assert(
-      next.proposals.some((p) => p.changes.some((c) => c.status === "pending")),
+      next.proposals.some((p) => p.cards.some((c) => c.status === "pending")),
     );
   },
 );

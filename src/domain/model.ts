@@ -125,12 +125,12 @@ export const arrangementSchema = z.object({
   occurrenceVersion: z.number().int().nonnegative().optional(),
 });
 export type Arrangement = z.infer<typeof arrangementSchema>;
+const changeStatus = z.enum(["pending", "accepted", "rejected"]);
 const changeSchema = z.object({
   id: z.string(),
   taskId: z.string(),
   taskVersion: z.number().nullable(),
   label: z.string(),
-  reason: z.string(),
   type: z.enum([
     "schedule",
     "split",
@@ -156,10 +156,12 @@ const changeSchema = z.object({
         description: child.description || goal || "",
       })),
   ),
-  status: z.enum(["pending", "accepted", "rejected"]),
   patch: taskPatchSchema.optional(),
   fromDate: z.string().optional(),
   fromTaskId: z.string().optional(),
+  fromTaskTitle: z.string().optional(),
+  targetTaskTitle: z.string().optional(),
+  originalScope: z.string().optional(),
   fromTaskVersion: z.number().int().optional(),
   done: z.boolean().optional(),
   recurrence: recurrenceRuleSchema.optional(),
@@ -167,18 +169,50 @@ const changeSchema = z.object({
   descendantIds: z.array(z.string()).optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
-export const proposalSchema = z.object({
+const adjustmentCardSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  title: z.string(),
+  reason: z.string(),
+  status: changeStatus,
+  previousExpectedDate: z.string().optional(),
+  changes: z.array(changeSchema).nonempty(),
+});
+export type AdjustmentCard = z.infer<typeof adjustmentCardSchema>;
+const proposalHeader = z.object({
   id: z.string(),
   sessionId: z.string(),
   createdAt: z.string(),
-  changes: z
-    .array(changeSchema)
-    .refine(
-      (changes) =>
-        new Set(changes.map((change) => change.id)).size === changes.length,
-      { message: "方案变更 ID 必须唯一。" },
-    ),
 });
+export const legacyProposalSchema = proposalHeader.extend({
+  changes: z.array(
+    changeSchema.extend({ reason: z.string(), status: changeStatus }),
+  ),
+});
+export const proposalSchema = proposalHeader
+  .extend({
+    legacy: z.literal(true).optional(),
+    cards: z
+      .array(adjustmentCardSchema)
+      .refine(
+        (cards) => new Set(cards.map((card) => card.id)).size === cards.length,
+        { message: "调整卡 ID 必须唯一。" },
+      ),
+  })
+  .refine(
+    ({ cards, legacy }) =>
+      cards.every((card) =>
+        card.changes.every(
+          (change) =>
+            change.taskId === card.taskId ||
+            (change.type === "schedule" && change.fromTaskId === card.taskId),
+        ),
+      ) &&
+      (legacy
+        ? cards.every((card) => card.changes.length === 1)
+        : new Set(cards.map((card) => card.taskId)).size === cards.length),
+    { message: "调整卡必须按任务分组。" },
+  );
 export type Proposal = z.infer<typeof proposalSchema>;
 export const stateSchema = z.object({
   revision: z.number().int(),
@@ -296,7 +330,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("resolve"),
     proposalId: z.string(),
-    ids: z.array(z.string()),
+    cardIds: z.array(z.string()).min(1),
     accept: z.boolean(),
   }),
   z.object({

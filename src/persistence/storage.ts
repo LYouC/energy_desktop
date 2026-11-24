@@ -10,9 +10,9 @@ import { applyCommand } from "../domain/operations";
 import { synchronizeRecurrence } from "../domain/recurrence";
 import { applyAgentTurn } from "../agent/turn";
 import { conversationLimit, trimConversations } from "../domain/conversations";
-import { migrateWorkspaceV1 } from "./migrations";
+import { migrateWorkspaceProposals, migrateWorkspaceV1 } from "./migrations";
 
-const workspaceVersion = 4;
+const workspaceVersion = 5;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -22,23 +22,26 @@ export class WorkspaceDatabase {
   ) {
     this.db = new DatabaseSync(filename);
     try {
-      const version = this.db.prepare("PRAGMA user_version").get() as {
-        user_version: number;
-      };
-      if (version.user_version > workspaceVersion)
-        throw new Error("数据库来自更新版本，请使用相应版本的息序打开。");
-      this.db.exec(
-        "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL);",
-      );
+      this.db.exec("PRAGMA journal_mode=WAL");
       this.inTransaction(() => {
+        const { user_version: version } = this.db
+          .prepare("PRAGMA user_version")
+          .get() as {
+          user_version: number;
+        };
+        if (version > workspaceVersion)
+          throw new Error("数据库来自更新版本，请使用相应版本的息序打开。");
+        this.db.exec(
+          "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL);",
+        );
         const row = this.db
           .prepare("SELECT payload FROM workspace WHERE id=1")
           .get() as { payload: string } | undefined;
-        if (row && version.user_version < 2) {
+        if (row && version < 2) {
           const migrated = migrateWorkspaceV1(row.payload);
           this.writeSnapshot(migrated);
-        } else if (row && version.user_version < workspaceVersion) {
-          stateSchema.parse(JSON.parse(row.payload));
+        } else if (row && version < workspaceVersion) {
+          this.writeSnapshot(migrateWorkspaceProposals(row.payload));
         }
         this.db.exec(`PRAGMA user_version=${workspaceVersion}`);
       });

@@ -25,17 +25,24 @@ function propose(state: State): Proposal {
     id: crypto.randomUUID(),
     sessionId: state.activeSessionId,
     createdAt: new Date().toISOString(),
-    changes: state.tasks.map((task) => ({
+    cards: state.tasks.map((task) => ({
       id: crypto.randomUUID(),
       taskId: task.id,
-      taskVersion: task.version,
-      type: "schedule",
-      date: localDate(),
-      scope: "完成初步产出",
-      label: task.title,
+      title: task.title,
       reason: "试用",
-      children: [],
       status: "pending",
+      changes: [
+        {
+          id: crypto.randomUUID(),
+          taskId: task.id,
+          taskVersion: task.version,
+          type: "schedule",
+          date: localDate(),
+          scope: "完成初步产出",
+          label: task.title,
+          children: [],
+        },
+      ],
     })),
   };
 }
@@ -46,20 +53,20 @@ test("部分接受、拒绝和重复接受保持范围正确", () => {
   const command = {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[0].id],
+    cardIds: [proposal.cards[0].id],
     accept: true,
   } as const;
-  state = applyCommand(state, { ...command, ids: [...command.ids] });
-  state = applyCommand(state, { ...command, ids: [...command.ids] });
+  state = applyCommand(state, { ...command, cardIds: [...command.cardIds] });
+  state = applyCommand(state, { ...command, cardIds: [...command.cardIds] });
   assert.equal(state.arrangements.length, 1);
   state = applyCommand(state, {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[1].id],
+    cardIds: [proposal.cards[1].id],
     accept: false,
   });
   assert.equal(state.arrangements.length, 1);
-  assert.equal(state.proposals[0].changes[1].status, "rejected");
+  assert.equal(state.proposals[0].cards[1].status, "rejected");
 });
 test("旧方案被阻止，失败前后原状态一致", () => {
   let state = fixture();
@@ -75,7 +82,7 @@ test("旧方案被阻止，失败前后原状态一致", () => {
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: proposal.changes.map((change) => change.id),
+        cardIds: proposal.cards.map((change) => change.id),
         accept: true,
       }),
     /重新分析/,
@@ -147,21 +154,21 @@ test("保存并安排作为一次操作失败时不留半成品", () => {
   assert.equal(state.tasks.length, 2);
 });
 
-test("重复变更 ID 不会重复创建子任务", () => {
+test("重复调整卡 ID 不会重复创建子任务", () => {
   let state = fixture();
   const proposal = propose(state);
-  proposal.changes = [
-    {
-      ...proposal.changes[0],
-      type: "split",
-      children: [{ title: "子任务", description: "完成条件" }],
-    },
-  ];
+  proposal.cards.length = 1;
+  const [card] = proposal.cards;
+  card.changes[0] = {
+    ...card.changes[0],
+    type: "split",
+    children: [{ title: "子任务", description: "完成条件" }],
+  };
   state = applyCommand(state, { type: "proposal", proposal });
   state = applyCommand(state, {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[0].id, proposal.changes[0].id],
+    cardIds: [proposal.cards[0].id, proposal.cards[0].id],
     accept: true,
   });
   assert.equal(state.tasks.filter((task) => task.parentId).length, 1);
@@ -212,7 +219,8 @@ test("最近结果按更新时间降序保留十条", () => {
 test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
   let state = fixture();
   const proposal = propose(state);
-  proposal.changes[1] = { ...proposal.changes[0], id: crypto.randomUUID() };
+  proposal.legacy = true;
+  proposal.cards[1] = { ...proposal.cards[0], id: crypto.randomUUID() };
   state = applyCommand(state, { type: "proposal", proposal });
   state = applyCommand(state, {
     type: "saveTask",
@@ -221,7 +229,7 @@ test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
   state = applyCommand(state, {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[0].id],
+    cardIds: [proposal.cards[0].id],
     accept: false,
   });
   assert.throws(
@@ -229,7 +237,7 @@ test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: [proposal.changes[1].id],
+        cardIds: [proposal.cards[1].id],
         accept: true,
       }),
     /重新分析/,

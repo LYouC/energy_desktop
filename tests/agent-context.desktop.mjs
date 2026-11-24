@@ -43,6 +43,7 @@ try {
                 taskId: "report",
                 date: new Date().toLocaleDateString("sv-SE"),
                 scope: "只写提纲",
+                reason: "先完成提纲，降低今天的工作量。",
               },
             ],
           }
@@ -148,9 +149,9 @@ try {
   expect(
     optimized.arrangements.some((item) => item.taskId === "archived"),
   ).toBe(true);
-  expect(optimized.proposals[0].changes[0]).toMatchObject({
-    scope: "只写提纲",
+  expect(optimized.proposals[0].cards[0]).toMatchObject({
     status: "pending",
+    changes: [{ scope: "只写提纲" }],
   });
   const firstRequests = await capturedBodies();
   expect(firstRequests).toHaveLength(3);

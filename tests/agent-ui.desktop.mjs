@@ -114,7 +114,7 @@ try {
   await expect(retry).toHaveCount(0);
   await expect(page.getByLabel("和息序聊聊")).toHaveValue("保留新的草稿");
 
-  // 新字段需要在待接受方案中可见，并通过同一个接受入口写入任务。
+  // A18 验证卡片合并展示与接受后的安排和字段联动。
   await page.evaluate(async () => {
     let state = await window.desktop.load();
     const taskId = crypto.randomUUID();
@@ -124,23 +124,29 @@ try {
       task: {
         id: taskId,
         version: 0,
-        title: "字段方案验证",
+        title: "整理发票",
         description: "",
         startDate: "",
-        expectedDate: "",
+        expectedDate: "2026-11-20",
         status: "todo",
         parentId: null,
         updatedAt: now,
       },
+      arrangement: { date: "2026-11-20", scope: "核对发票" },
     });
     const proposalId = crypto.randomUUID();
+    const change = {
+      taskId,
+      taskVersion: state.tasks.find((task) => task.id === taskId).version,
+      children: [],
+    };
     await window.desktop.execute(state.revision, {
       type: "reply",
       message: {
         id: crypto.randomUUID(),
         sessionId: state.activeSessionId,
         role: "assistant",
-        text: "建议补充以下信息。",
+        text: "建议把整理发票移到明天。",
         createdAt: now,
         proposalId,
       },
@@ -148,43 +154,75 @@ try {
         id: proposalId,
         sessionId: state.activeSessionId,
         createdAt: now,
-        changes: [
+        cards: [
           {
             id: crypto.randomUUID(),
             taskId,
-            taskVersion: state.tasks.find((task) => task.id === taskId).version,
-            type: "update",
-            label: "补充任务信息",
-            reason: "固定测试方案",
-            date: "",
-            scope: "",
-            children: [],
+            title: "整理发票",
+            reason: "给今天的报告留出时间",
             status: "pending",
-            patch: {
-              startDate: "2026-11-19",
-              expectedDate: "2026-11-21",
-              description: "保留目标和硬截止",
-            },
+            previousExpectedDate: "2026-11-20",
+            changes: [
+              {
+                ...change,
+                id: crypto.randomUUID(),
+                type: "unschedule",
+                label: "取消旧安排",
+                date: "2026-11-20",
+                scope: "",
+              },
+              {
+                ...change,
+                id: crypto.randomUUID(),
+                type: "schedule",
+                label: "安排新日期",
+                date: "2026-11-21",
+                scope: "核对发票",
+              },
+              {
+                ...change,
+                id: crypto.randomUUID(),
+                type: "update",
+                label: "更新任务",
+                date: "",
+                scope: "",
+                patch: {
+                  startDate: "2026-11-19",
+                  expectedDate: "2026-11-21",
+                  description: "保留目标和硬截止",
+                },
+              },
+            ],
           },
         ],
       },
     });
   });
   await page.reload();
-  await expect(page.locator(".proposal")).toContainText("预计开始：2026-11-19");
-  await expect(page.locator(".proposal")).toContainText("预计完成：2026-11-21");
-  await expect(page.locator(".proposal")).toContainText(
-    "说明：保留目标和硬截止",
-  );
-  expect(
-    (await page.evaluate(() => window.desktop.load())).tasks[0].description,
-  ).toBe("");
-  await page.getByRole("button", { name: "接受这项", exact: true }).click();
+  const card = page.locator(".proposal-change");
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("2026-11-20 → 2026-11-21 · 核对发票");
+  await expect(card).toContainText("预计开始：2026-11-19");
+  await expect(card).toContainText("预计完成：2026-11-20 → 2026-11-21");
+  await expect(card).toContainText("说明：保留目标和硬截止");
+  await expect(
+    card.getByText("给今天的报告留出时间", { exact: true }),
+  ).toHaveCount(1);
+  const accept = card.getByRole("button", { name: "接受", exact: true });
+  await expect(accept).toHaveCount(1);
+  await expect(
+    card.getByRole("button", { name: "拒绝", exact: true }),
+  ).toHaveCount(1);
+  const pending = await page.evaluate(() => window.desktop.load());
+  expect(pending.tasks[0].description).toBe("");
+  expect(pending.arrangements.map(({ date }) => date)).toEqual(["2026-11-20"]);
+  await accept.click();
+  await expect(card).toContainText("已接受 · 已生效");
   const applied = await page.evaluate(() => window.desktop.load());
   expect(applied.tasks[0].description).toBe("保留目标和硬截止");
   expect(applied.tasks[0].startDate).toBe("2026-11-19");
   expect(applied.tasks[0].expectedDate).toBe("2026-11-21");
-  expect(applied.arrangements).toHaveLength(0);
+  expect(applied.arrangements.map(({ date }) => date)).toEqual(["2026-11-21"]);
 
   await page.evaluate(async () => {
     let state = await window.desktop.load();

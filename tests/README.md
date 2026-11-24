@@ -20,7 +20,7 @@
 
 重复任务交付通过 107 项离线用例、格式检查、类型检查、生产构建和六组 Electron 桌面回归。详见 `git show 2d368a0`。
 
-Agent 重复任务扩展通过 117 项离线用例和六组 Electron 桌面回归。新增 [Agent 重复任务测试](agent-recurrence.test.ts)覆盖三种规则、当天操作、部分接受、过期与级联删除范围校验，以及普通和重复动作的事务回滚。[SDK 工具测试](agent-tools.test.ts)检查重复任务回执，[重复任务桌面脚本](recurrence.desktop.mjs)验证频率和实例方案的呈现与逐项接受。
+任务调整卡上线前，Agent 重复任务扩展通过 117 项离线用例和六组 Electron 桌面回归，覆盖三种规则、当天操作、旧方案的逐条确认、过期与级联删除范围校验，以及普通和重复动作的事务回滚。当前回归入口为 [Agent 重复任务测试](agent-recurrence.test.ts)、[SDK 工具测试](agent-tools.test.ts)和 [重复任务桌面脚本](recurrence.desktop.mjs)。
 
 自绘窗口、快捷优化和调试面板通过 119 项离线用例、七组桌面回归和 Windows 目录包冒烟测试。桌面脚本验证窗口按钮的键盘与鼠标路径、弹窗中最大化／还原，以及调试展示与模拟传输收到的每个请求体一致。目录包验证调试入口关闭。实际窗口已验证标题栏双击最大化／还原，以及通过 `Alt+Space` 移动和在弹窗中改变窗口大小。鼠标拖动标题栏和边缘调整尺寸未能通过本机自动化复核。优化建议质量留待真实模型复验。
 
@@ -36,9 +36,13 @@ Agent 重复任务扩展通过 117 项离线用例和六组 Electron 桌面回�
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 任务与安排       | [领域测试](domain.test.ts)、[任务字段测试](task-fields.test.ts)和 [今日安排桌面脚本](today.desktop.mjs)覆盖父子任务、预计日期与安排隔离、阶段完成与恢复、焦点和调序。任务字段桌面脚本覆盖重要性标注、筛选与搜索联用、管理选择及保存后的显示。                    |
 | 重复任务         | [领域测试](recurrence.test.ts)、[存储测试](recurrence-storage.test.ts)和 [桌面脚本](recurrence.desktop.mjs)覆盖周期规则、同日安排复用、跨日补齐和版本检查、调序、移除及撤销、删除模板后保留实例，以及筛选、混合选择和深浅主题标签。                              |
-| 持久化与方案     | [工作区测试](workspace.test.ts)、[任务字段测试](task-fields.test.ts)和 [Agent 领域测试](agent-domain.test.ts)覆盖重开恢复、旧数据迁移、版本冲突、原子应用、部分接受及重复应用保护。                                                                              |
+| 持久化与方案     | [工作区测试](workspace.test.ts)、[任务字段测试](task-fields.test.ts)和 [Agent 领域测试](agent-domain.test.ts)覆盖重开恢复、旧数据迁移、版本冲突、整卡原子应用、跨任务独立确认及重复应用保护。                                                                    |
 | Agent 运行与会话 | [运行测试](agent-runtime.test.ts)、[工具测试](agent-tools.test.ts)、[会话测试](conversations.test.ts)和 [Agent 桌面脚本](agent-ui.desktop.mjs)覆盖工具编排、协议错误、中断重试、取消、幂等提交、分页和删除。Agent 可读取重要性，并通过共享领域操作管理重复任务。 |
 | 主题与布局       | [配色测试](styles.test.ts)和 [桌面审查脚本](review.desktop.mjs)覆盖系统主题实时变化、手选优先、偏好恢复、实际 DOM 对比度、键盘焦点和 800px 窄窗口。                                                                                                              |
+
+## 任务调整卡验证
+
+[Agent 领域测试](agent-domain.test.ts)覆盖 A18 改期与预计完成日期联动、整卡拒绝、校验失败后的 SQLite 回滚、重复接受，以及 A06 的跨任务独立确认。[工作区测试](workspace.test.ts)覆盖旧方案状态和确认范围迁移。[对话桌面测试](agent-ui.desktop.mjs)核对移期方向、理由和按钮数量，以及接受后的实际保存结果。
 
 ## 真实模型验证
 
@@ -50,6 +54,7 @@ Agent 重复任务扩展通过 117 项离线用例和六组 Electron 桌面回�
 - `npm run test:agent:behavior` 验证自然确认、草稿承接、含糊指代、事实纠正和历史查询等场景。用 `XIXU_BEHAVIOR_FILTER` 按逗号分隔的子串选择场景。
 - PowerShell 中将 `$env:XIXU_BEHAVIOR_FILTER = 'B09'` 后运行 `npm run test:agent:behavior`，选择重复任务五条场景。
 - PowerShell 中设置 `$env:XIXU_BEHAVIOR_FILTER = 'B10'` 后运行 `npm run test:agent:behavior`，核对回复中的系统本地年月日和时分以及空业务动作。
+- PowerShell 中设置 `$env:XIXU_BEHAVIOR_FILTER = 'B08,B11'` 后运行 `npm run test:agent:behavior`，检查自然确认、同任务改期和预计完成日期同卡，以及接受后的范围。
 - `node tests/agent-real.desktop.mjs` 对已构建的应用发送一轮真实桌面对话，检查 SQLite 保存和重启恢复。
 
 ## Windows 交付

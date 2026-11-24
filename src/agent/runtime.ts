@@ -16,6 +16,7 @@ import {
   tasksForAgent,
 } from "./context";
 import { localDate, type Command, type State } from "../domain/model";
+import { applyCommand } from "../domain/operations";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "./capacity";
 
@@ -192,6 +193,27 @@ export async function generateAgentTurn(options: {
           undefined,
           context.date,
         );
+        const newProposalId = next.messages.at(-1)?.proposalId;
+        const newProposal = next.proposals.find(
+          ({ id }) => id === newProposalId,
+        );
+        const missingReason = newProposal?.cards.find((card) => !card.reason);
+        if (missingReason)
+          throw new Error(
+            `请为「${missingReason.title}」的调整卡填写一条具体理由，并重新提交完整动作。`,
+          );
+        if (newProposal)
+          for (const card of newProposal.cards)
+            applyCommand(
+              next,
+              {
+                type: "resolve",
+                proposalId: newProposal.id,
+                cardIds: [card.id],
+                accept: true,
+              },
+              context.date,
+            );
         const oldTasks = new Map(state.tasks.map((task) => [task.id, task]));
         const updatedTasks = tasksForAgent(next.tasks);
         const changedTasks = updatedTasks.filter(
@@ -259,45 +281,72 @@ export async function generateAgentTurn(options: {
                 nextTasks.has(arrangement.taskId),
             )
             .map(({ arrangement }) => withTaskTitle(arrangement)),
-          resolvedChanges: actions.flatMap((action) => {
+          resolvedCards: actions.flatMap((action) => {
             if (action.type !== "resolve") return [];
             const proposal = next.proposals.find(
               (item) => item.id === action.proposalId,
             );
-            return (proposal?.changes ?? [])
-              .filter((change) => action.ids.includes(change.id))
-              .map(({ label, status }) => ({ label, status }));
+            return (proposal?.cards ?? [])
+              .filter((card) => action.cardIds.includes(card.id))
+              .map(({ title, status }) => ({ title, status }));
           }),
-          pendingChanges: next.proposals
+          pendingCards: next.proposals
             .filter((proposal) => proposal.sessionId === sessionId)
             .flatMap((proposal) =>
-              proposal.changes
+              proposal.cards
                 .filter(
-                  (change) =>
-                    change.status === "pending" &&
-                    refersToCurrentTasks(change, nextTaskIds),
+                  (card) =>
+                    card.status === "pending" &&
+                    card.changes.every((change) =>
+                      refersToCurrentTasks(change, nextTaskIds),
+                    ),
                 )
-                .map(
-                  ({
-                    label,
-                    type,
-                    scope,
-                    date,
-                    recurrence,
-                    done,
-                    descendantIds,
-                  }) => ({
-                    label,
-                    type,
-                    scope,
-                    date,
-                    recurrence,
-                    done,
-                    completionDescendantCount: done
-                      ? descendantIds?.length
-                      : undefined,
-                  }),
-                ),
+                .map(({ title, reason, changes, previousExpectedDate }) => ({
+                  title,
+                  reason,
+                  previousExpectedDate,
+                  changes: changes.map(
+                    ({
+                      label,
+                      type,
+                      scope,
+                      date,
+                      fromDate,
+                      fromTaskTitle,
+                      targetTaskTitle,
+                      originalScope,
+                      patch,
+                      recurrence,
+                      children,
+                      done,
+                      descendantIds,
+                    }) => {
+                      const { parentId, ...fields } = patch ?? {};
+                      return {
+                        label,
+                        type,
+                        scope,
+                        date,
+                        fromDate,
+                        fromTaskTitle,
+                        targetTaskTitle,
+                        originalScope,
+                        patch: patch && {
+                          ...fields,
+                          parentTitle: parentId
+                            ? nextTasks.get(parentId)?.title
+                            : parentId,
+                        },
+                        recurrence,
+                        children,
+                        done,
+                        completionDescendantCount: done
+                          ? descendantIds?.length
+                          : undefined,
+                      };
+                    },
+                  ),
+                })),
             ),
         };
       } catch (error) {

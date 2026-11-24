@@ -323,13 +323,13 @@ await run(
   accepted,
   "按你的建议来吧。",
   [
-    "理解本会话唯一明确日程建议，接受对应的真实变更ID。",
+    "理解本会话唯一明确日程建议，接受对应的真实调整卡 ID。",
     "执行一次并反馈生效范围。",
   ],
   (_before, next) => {
     assert.equal(next.arrangements.length, 1);
     assert.equal(next.arrangements[0].scope, "练习自我介绍十分钟");
-    assert.equal(next.proposals[0].changes[0].status, "accepted");
+    assert.equal(next.proposals[0].cards[0].status, "accepted");
   },
 );
 const today = localDate();
@@ -397,9 +397,10 @@ await run(
   (before, next) => {
     assert.deepEqual(next.tasks, before.tasks);
     assert.deepEqual(next.arrangements, before.arrangements);
-    const change = next.proposals.at(-1)?.changes[0];
+    const card = next.proposals.at(-1)?.cards[0];
+    const change = card?.changes[0];
     assert.equal(change?.type, "updateRecurrence");
-    assert.equal(change?.status, "pending");
+    assert.equal(card?.status, "pending");
     assert.deepEqual(change?.recurrence, {
       type: "weekly",
       weekdays: [1, 3, 5],
@@ -435,7 +436,7 @@ await run(
       weekdays: [1, 3, 5],
     });
     assert.deepEqual(next.arrangements, before.arrangements);
-    assert.equal(next.proposals.at(-1)?.changes[0].status, "accepted");
+    assert.equal(next.proposals.at(-1)?.cards[0].status, "accepted");
   },
 );
 const deleted = applyCommand(
@@ -477,6 +478,63 @@ await run(
       `系统本地时间应为 ${expected.join(" 或 ")}`,
     );
     assert.deepEqual(turn.actions, []);
+  },
+);
+const nextDay = new Date(`${today}T12:00:00`);
+nextDay.setDate(nextDay.getDate() + 1);
+const tomorrow = localDate(nextDay);
+const invoice = { ...newTask(), title: "整理发票", expectedDate: today };
+const invoiceState = applyCommand(emptyState(), {
+  type: "saveTask",
+  task: invoice,
+  arrangement: { date: today, scope: "核对发票" },
+});
+const invoiceProposal = await run(
+  "B11a 改期和预计完成日期组成一张调整卡",
+  invoiceState,
+  "今天要先交报告。请给我一个调整建议，把整理发票从今天推到明天，预计完成日期也推到明天，先别应用。",
+  ["说明改期理由，保留原安排的推进范围，清楚表达建议未生效。"],
+  (before, next, turn) => {
+    assert.deepEqual(next.tasks, before.tasks);
+    assert.deepEqual(next.arrangements, before.arrangements);
+    const cards = next.proposals.at(-1)?.cards ?? [];
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].taskId, invoice.id);
+    assert.equal(cards[0].status, "pending");
+    assert(turn.actions.some((action) => "reason" in action && action.reason));
+    assert(
+      cards[0].changes.some(
+        (change) => change.type === "schedule" && change.date === tomorrow,
+      ),
+    );
+    assert(
+      cards[0].changes.some(
+        (change) => change.patch?.expectedDate === tomorrow,
+      ),
+    );
+  },
+);
+await run(
+  "B11b 自然确认后整卡生效",
+  invoiceProposal,
+  "好，就按这张调整卡来。",
+  ["确认范围覆盖原建议的安排和预计完成日期，回复以实际回执为准。"],
+  (before, next, turn) => {
+    const originalCard = before.proposals.at(-1)?.cards[0];
+    assert(
+      turn.actions.some(
+        (action) =>
+          action.type === "resolve" &&
+          action.cardIds.includes(originalCard?.id ?? "") &&
+          action.accept,
+      ),
+    );
+    assert.equal(next.proposals.at(-1)?.cards[0].status, "accepted");
+    assert.equal(next.tasks[0].expectedDate, tomorrow);
+    assert.deepEqual(
+      next.arrangements.map(({ date, scope }) => [date, scope]),
+      [[tomorrow, "核对发票"]],
+    );
   },
 );
 save();

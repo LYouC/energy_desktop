@@ -1,3 +1,4 @@
+import { migrateWorkspaceProposals } from "../src/persistence/migrations";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyState, newTask, stateSchema } from "../src/domain/model";
@@ -163,38 +164,40 @@ test("Agent动作与草稿拒绝旧字段，历史拆分读取时保留旧目标
     false,
   );
   const state = fixture();
-  const restored = stateSchema.parse({
-    ...state,
-    proposals: [
-      {
-        id: "legacy",
-        sessionId: state.activeSessionId,
-        createdAt: new Date().toISOString(),
-        changes: [
-          {
-            id: "split",
-            taskId: state.tasks[0].id,
-            taskVersion: state.tasks[0].version,
-            type: "split",
-            label: "旧拆分",
-            reason: "历史",
-            date: "",
-            scope: "",
-            status: "pending",
-            children: [{ title: "朗读", goal: "读一页" }],
-          },
-        ],
-      },
-    ],
-  });
+  const restored = migrateWorkspaceProposals(
+    JSON.stringify({
+      ...state,
+      proposals: [
+        {
+          id: "legacy",
+          sessionId: state.activeSessionId,
+          createdAt: new Date().toISOString(),
+          changes: [
+            {
+              id: "split",
+              taskId: state.tasks[0].id,
+              taskVersion: state.tasks[0].version,
+              type: "split",
+              label: "旧拆分",
+              reason: "历史",
+              date: "",
+              scope: "",
+              status: "pending",
+              children: [{ title: "朗读", goal: "读一页" }],
+            },
+          ],
+        },
+      ],
+    }),
+  );
   assert.equal(
-    restored.proposals[0].changes[0].children[0].description,
+    restored.proposals[0].cards[0].changes[0].children[0].description,
     "读一页",
   );
   const accepted = applyCommand(restored, {
     type: "resolve",
     proposalId: "legacy",
-    ids: ["split"],
+    cardIds: ["split"],
     accept: true,
   });
   assert.equal(accepted.tasks[1].description, "读一页");
@@ -226,14 +229,14 @@ test("直接采用相同拆分会接受原方案且重试不重复子任务", ()
     },
   );
   assert.equal(
-    adopted.proposals.find((p) => p.id === proposalId)?.changes[0].status,
+    adopted.proposals.find((p) => p.id === proposalId)?.cards[0].status,
     "accepted",
   );
   assert.equal(adopted.tasks.filter((t) => t.parentId === taskId).length, 1);
   const retried = applyCommand(adopted, {
     type: "resolve",
     proposalId,
-    ids: [adopted.proposals.find((p) => p.id === proposalId)!.changes[0].id],
+    cardIds: [adopted.proposals.find((p) => p.id === proposalId)!.cards[0].id],
     accept: true,
   });
   assert.equal(retried.tasks.filter((t) => t.parentId === taskId).length, 1);
@@ -304,12 +307,12 @@ test("更新安排建议待接受，接受后父转子只有一个安排", () =>
   );
   assert.deepEqual(proposed.arrangements, state.arrangements);
   const proposal = proposed.proposals[0];
-  assert.equal(proposal.changes[0].fromTaskId, parentId);
-  assert.equal(proposal.changes[0].taskId, childId);
+  assert.equal(proposal.cards[0].changes[0].fromTaskId, parentId);
+  assert.equal(proposal.cards[0].taskId, childId);
   const next = applyCommand(proposed, {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[0].id],
+    cardIds: [proposal.cards[0].id],
     accept: true,
   });
   assert.equal(next.arrangements.length, 1);
@@ -346,7 +349,7 @@ test("源安排所属任务变化后拒绝旧替换方案并保留完整状态",
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: [proposal.changes[0].id],
+        cardIds: [proposal.cards[0].id],
         accept: true,
       }),
     /原安排所属任务已变化/,
@@ -406,6 +409,70 @@ test("修改不存在的源安排被拒绝且不产生新安排", () => {
   assert.deepEqual(state, before);
 });
 
+test("改派与原任务的预计完成日期一起确认，卡内保留两端任务", () => {
+  const { state, parentId, childId } = arrangementFixture();
+  const actions = [
+    {
+      type: "updateArrangement",
+      mode: "proposal",
+      taskId: parentId,
+      targetTaskId: childId,
+      date: "2026-11-17",
+      scope: "写提纲",
+      reason: "单独推进提纲",
+    },
+    {
+      type: "updateTask",
+      mode: "proposal",
+      taskId: parentId,
+      patch: { expectedDate: "2026-11-18" },
+    },
+  ];
+  const planned = applyAgentTurn(
+    state,
+    state.activeSessionId,
+    "建议把提纲交给子任务做",
+    {
+      text: "建议改派并更新报告完成日期。",
+      actions,
+    },
+  );
+  assert.throws(
+    () =>
+      applyAgentTurn(state, state.activeSessionId, "同时调整两个任务", {
+        text: "建议更新两端字段。",
+        actions: [
+          ...actions,
+          {
+            type: "updateTask",
+            mode: "proposal",
+            taskId: childId,
+            patch: { expectedDate: "2026-11-18" },
+          },
+        ],
+      }),
+    /两端任务的待定调整有重叠/,
+  );
+  const [proposal] = planned.proposals;
+  assert.equal(proposal.cards.length, 1);
+  const [card] = proposal.cards;
+  const transfer = card.changes.find((change) => change.type === "schedule");
+  assert.equal(card.taskId, parentId);
+  assert.equal(transfer?.fromTaskTitle, "报告");
+  assert.equal(transfer?.targetTaskTitle, "整理提纲");
+  const accepted = applyCommand(planned, {
+    type: "resolve",
+    proposalId: proposal.id,
+    cardIds: [card.id],
+    accept: true,
+  });
+  assert.deepEqual(
+    accepted.arrangements.map(({ taskId }) => taskId),
+    [childId],
+  );
+  assert.equal(accepted.tasks[0].expectedDate, "2026-11-18");
+});
+
 test("同源替代方案接受一项后另一项失效，同批冲突原子回滚", () => {
   const { state: initial, parentId, childId } = arrangementFixture();
   const alternate = { ...newTask(parentId), title: "另一个阶段" };
@@ -446,7 +513,7 @@ test("同源替代方案接受一项后另一项失效，同批冲突原子回�
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: proposal.changes.map((c) => c.id),
+        cardIds: proposal.cards.map((c) => c.id),
         accept: true,
       }),
     /原安排已不存在/,
@@ -455,7 +522,7 @@ test("同源替代方案接受一项后另一项失效，同批冲突原子回�
   state = applyCommand(state, {
     type: "resolve",
     proposalId: proposal.id,
-    ids: [proposal.changes[0].id],
+    cardIds: [proposal.cards[0].id],
     accept: true,
   });
   const acceptedBefore = structuredClone(state);
@@ -464,80 +531,79 @@ test("同源替代方案接受一项后另一项失效，同批冲突原子回�
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: [proposal.changes[1].id],
+        cardIds: [proposal.cards[1].id],
         accept: true,
       }),
-    /原安排已不存在/,
+    /原安排.*需要重新分析/,
   );
   assert.deepEqual(state, acceptedBefore);
   assert.equal(state.arrangements.length, 1);
   assert.equal(state.arrangements[0].scope, "A");
 });
-test("模型用具体变更ID表达自然确认的接受范围", () => {
+test("自然确认按整卡接受，明确缩小范围时只执行新授权", () => {
   const initial = fixture();
+  const taskId = initial.tasks[0].id;
+  const split = {
+    type: "split",
+    taskId,
+    children: [{ title: "提纲", description: "列出讨论问题" }],
+    mode: "proposal",
+  } as const;
   const state = applyAgentTurn(
     initial,
     initial.activeSessionId,
-    "给拆分建议，也给安排建议",
+    "给拆分和安排建议",
     {
-      text: "待接受的拆分",
+      text: "待接受的调整",
       actions: [
-        {
-          type: "split",
-          taskId: initial.tasks[0].id,
-          children: [{ title: "提纲", description: "列出讨论问题" }],
-          mode: "proposal",
-          quote: "给拆分建议",
-        },
+        split,
         {
           type: "schedule",
-          taskId: initial.tasks[0].id,
+          taskId,
           date: "2026-11-16",
           scope: "整理材料",
           mode: "proposal",
-          quote: "给安排建议",
         },
       ],
     },
   );
-  const proposal = state.proposals[0];
-  const quote = "按你的建议，先落实拆分的部分";
-  const turn = {
-    text: "已建立子任务",
-    actions: [
-      {
-        type: "resolve",
-        proposalId: proposal.id,
-        ids: [proposal.changes[0].id],
-        accept: true,
-        mode: "direct",
-        quote,
-      },
-    ],
-  };
-  const next = applyAgentTurn(
+  const [proposal] = state.proposals;
+  const [card] = proposal.cards;
+  assert.equal(proposal.cards.length, 1);
+  const narrowed = applyAgentTurn(
     state,
     state.activeSessionId,
-    quote + "；今天只安排整理提纲，其他步骤先不安排。",
-    turn,
+    "只拆分，今天先别排",
+    {
+      text: "已建立子任务",
+      actions: [{ ...split, mode: "direct" }],
+    },
   );
-  assert.equal(next.tasks.length, 2);
-  assert.equal(next.arrangements.length, 0);
-  assert.equal(next.proposals[0].changes[1].status, "pending");
-  const allQuote = "按你的建议，这两项都落实";
-  const all = applyAgentTurn(state, state.activeSessionId, allQuote, {
-    ...turn,
-    actions: [
-      {
-        ...turn.actions[0],
-        quote: allQuote,
-        ids: proposal.changes.map((c) => c.id),
-      },
-    ],
+  assert.equal(narrowed.tasks.length, 2);
+  assert.equal(narrowed.arrangements.length, 0);
+  assert.equal(narrowed.proposals[0].cards[0].status, "pending");
+  const command = {
+    type: "resolve",
+    proposalId: proposal.id,
+    cardIds: [card.id],
+    accept: true,
+    mode: "direct",
+  };
+  const all = applyAgentTurn(state, state.activeSessionId, "就按这张卡来", {
+    text: "已接受调整",
+    actions: [command],
   });
   assert.equal(all.tasks.length, 2);
   assert.equal(all.arrangements.length, 1);
-  assert(all.proposals[0].changes.every((c) => c.status === "accepted"));
+  assert.equal(all.proposals[0].cards[0].status, "accepted");
+  assert.throws(
+    () =>
+      applyAgentTurn(narrowed, narrowed.activeSessionId, "就按这张卡来", {
+        text: "已接受调整",
+        actions: [command],
+      }),
+    /重新分析/,
+  );
 });
 test("建立任务与待接受拆分可同轮提交，引用由应用分配", () => {
   const state = emptyState();
@@ -567,7 +633,7 @@ test("建立任务与待接受拆分可同轮提交，引用由应用分配", ()
     },
   );
   assert.equal(next.tasks.length, 1);
-  assert.equal(next.proposals[0].changes[0].taskId, next.tasks[0].id);
+  assert.equal(next.proposals[0].cards[0].taskId, next.tasks[0].id);
   assert.equal(next.messages.at(-1)?.proposalId, next.proposals[0].id);
   assert.equal(state.tasks.length, 0);
 });
@@ -676,7 +742,7 @@ test("不能跨会话接受方案，接受重试只生效一次", () => {
       {
         type: "resolve",
         proposalId: proposal.id,
-        ids: [proposal.changes[0].id],
+        cardIds: [proposal.cards[0].id],
         accept: true,
         mode: "direct",
         quote: "接受这项",
@@ -720,23 +786,255 @@ test("新增方案操作更新任务与阶段，拒绝不改业务数据", () =>
       },
     ],
   });
-  const p = state.proposals[0];
-  state = applyCommand(state, {
-    type: "resolve",
+  const [p] = state.proposals;
+  assert.equal(p.cards.length, 1);
+  const command = {
+    type: "resolve" as const,
     proposalId: p.id,
-    ids: [p.changes[0].id],
+    cardIds: [p.cards[0].id],
+  };
+  const rejected = applyCommand(state, { ...command, accept: false });
+  assert.deepEqual(rejected.tasks, state.tasks);
+  assert.deepEqual(rejected.arrangements, state.arrangements);
+  assert.equal(rejected.proposals[0].cards[0].status, "rejected");
+  const accepted = applyCommand(state, { ...command, accept: true });
+  assert.equal(accepted.tasks[0].status, "waiting");
+  assert.equal(accepted.arrangements[0].done, true);
+});
+function invoiceAdjustmentFixture(db: WorkspaceDatabase, today: string) {
+  const tomorrow = "2026-11-21";
+  const invoice = {
+    ...newTask(),
+    title: "整理发票",
+    startDate: today,
+    expectedDate: today,
+  };
+  const state = db.execute(db.load().revision, {
+    type: "saveTask",
+    task: invoice,
+    arrangement: { date: today, scope: "核对发票" },
+  });
+  const move = {
+    type: "schedule",
+    mode: "proposal",
+    taskId: invoice.id,
+    fromDate: today,
+    date: tomorrow,
+    scope: "核对发票",
+    reason: "给今天的报告留出时间",
+  };
+  const update = {
+    type: "updateTask",
+    mode: "proposal",
+    taskId: invoice.id,
+    patch: { expectedDate: tomorrow },
+  };
+  return { state, invoice, move, update, tomorrow };
+}
+
+test("A18 整卡改期与预计日期联动，A06 的另一任务可以单独拒绝", (t) => {
+  const today = "2026-11-20";
+  const db = new WorkspaceDatabase(":memory:", () => today);
+  t.after(() => db.close());
+  const {
+    state: initial,
+    invoice,
+    move,
+    update,
+    tomorrow,
+  } = invoiceAdjustmentFixture(db, today);
+  const report = { ...newTask(), title: "报告" };
+  const state = db.execute(initial.revision, {
+    type: "saveTask",
+    task: report,
+  });
+  const suggested = db.commitAgentTurn(
+    state.revision,
+    state.activeSessionId,
+    "帮我调整一下",
+    {
+      text: "建议调整发票和报告的安排。",
+      actions: [
+        move,
+        update,
+        {
+          type: "schedule",
+          mode: "proposal",
+          taskId: report.id,
+          date: today,
+          scope: "完成初稿",
+        },
+      ],
+    },
+  );
+  assert.deepEqual(suggested.tasks, state.tasks);
+  assert.deepEqual(suggested.arrangements, state.arrangements);
+  const [proposal] = suggested.proposals;
+  assert.equal(proposal.cards.length, 2);
+  const [invoiceCard, reportCard] = proposal.cards;
+  assert.equal(invoiceCard.reason, move.reason);
+  const resolve = {
+    type: "resolve" as const,
+    proposalId: proposal.id,
+    cardIds: [invoiceCard.id],
+  };
+  const rejected = applyCommand(
+    suggested,
+    { ...resolve, accept: false },
+    today,
+  );
+  assert.deepEqual(rejected.arrangements, state.arrangements);
+  assert.deepEqual(rejected.tasks, state.tasks);
+  assert.equal(rejected.proposals[0].cards[0].status, "rejected");
+
+  const accepted = db.execute(suggested.revision, { ...resolve, accept: true });
+  assert.equal(accepted.tasks[0].expectedDate, tomorrow);
+  assert.deepEqual(
+    accepted.arrangements.map(({ date, taskId }) => [date, taskId]),
+    [[tomorrow, invoice.id]],
+  );
+  assert.equal(accepted.proposals[0].cards[0].status, "accepted");
+  assert.equal(accepted.proposals[0].cards[1].status, "pending");
+  assert.deepEqual(
+    db.execute(accepted.revision, { ...resolve, accept: true }),
+    accepted,
+  );
+  const done = db.execute(accepted.revision, {
+    ...resolve,
+    cardIds: [reportCard.id],
     accept: false,
   });
-  assert.equal(state.tasks[0].status, "todo");
-  state = applyCommand(state, {
+  assert.deepEqual(done.tasks[1], state.tasks[1]);
+  assert.deepEqual(done.arrangements, accepted.arrangements);
+});
+
+test("A18 日期校验失败回滚已预先应用的改期，保留待接受状态", (t) => {
+  const today = "2026-11-20";
+  const db = new WorkspaceDatabase(":memory:", () => today);
+  t.after(() => db.close());
+  const { state, move, update } = invoiceAdjustmentFixture(db, today);
+  const invalid = db.commitAgentTurn(
+    state.revision,
+    state.activeSessionId,
+    "建议改期",
+    {
+      text: "建议调整安排与完成日期。",
+      actions: [move, { ...update, patch: { expectedDate: "2026-11-19" } }],
+    },
+  );
+  const bad = invalid.proposals.at(-1)!;
+  assert.throws(
+    () =>
+      db.execute(invalid.revision, {
+        type: "resolve",
+        proposalId: bad.id,
+        cardIds: [bad.cards[0].id],
+        accept: true,
+      }),
+    /预计完成日期/,
+  );
+  assert.deepEqual(db.load(), invalid);
+});
+
+test("一张卡只保留连续移期的最终安排，并按完整日期组合校验", () => {
+  const task = {
+    ...newTask(),
+    title: "整理发票",
+    startDate: "2026-11-25",
+    expectedDate: "2026-11-26",
+  };
+  const initial = applyCommand(emptyState(), {
+    type: "saveTask",
+    task,
+    arrangement: { date: "2026-11-20", scope: "先核对发票" },
+  });
+  const options = { taskId: task.id, mode: "proposal" };
+  const planned = applyAgentTurn(
+    initial,
+    initial.activeSessionId,
+    "请建议一个新日期",
+    {
+      text: "建议改到 22 日。",
+      actions: [
+        {
+          ...options,
+          type: "schedule",
+          fromDate: "2026-11-20",
+          date: "2026-11-21",
+          scope: "先核对发票",
+          reason: "给今天的报告让出时间",
+        },
+        {
+          ...options,
+          type: "schedule",
+          fromDate: "2026-11-21",
+          date: "2026-11-22",
+          scope: "核对并登记发票",
+        },
+        {
+          ...options,
+          type: "updateTask",
+          patch: { expectedDate: "2026-11-23" },
+        },
+        { ...options, type: "updateTask", patch: { startDate: "2026-11-22" } },
+      ],
+    },
+  );
+  const [proposal] = planned.proposals;
+  const [card] = proposal.cards;
+  const moves = card.changes.filter((change) => change.type === "schedule");
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].fromDate, "2026-11-20");
+  assert.equal(moves[0].date, "2026-11-22");
+  assert.equal(moves[0].originalScope, "先核对发票");
+  const accepted = applyCommand(planned, {
     type: "resolve",
-    proposalId: p.id,
-    ids: [p.changes[1].id],
+    proposalId: proposal.id,
+    cardIds: [card.id],
     accept: true,
   });
-  assert.equal(state.tasks[0].status, "todo");
-  assert.equal(state.arrangements[0].done, true);
+  assert.equal(accepted.tasks[0].startDate, "2026-11-22");
+  assert.equal(accepted.tasks[0].expectedDate, "2026-11-23");
+  assert.deepEqual(
+    accepted.arrangements.map(({ date, scope }) => [date, scope]),
+    [["2026-11-22", "核对并登记发票"]],
+  );
 });
+
+test("连续移期会移除本卡先前在中间日期新增的安排", () => {
+  const task = { ...newTask(), title: "整理发票" };
+  const initial = applyCommand(emptyState(), {
+    type: "saveTask",
+    task,
+    arrangement: { date: "2026-11-20", scope: "核对发票" },
+  });
+  const base = {
+    type: "schedule",
+    mode: "proposal",
+    taskId: task.id,
+    scope: "核对发票",
+  };
+  const planned = applyAgentTurn(initial, initial.activeSessionId, "建议改期", {
+    text: "建议安排到 22 日。",
+    actions: [
+      { ...base, date: "2026-11-21", reason: "给今天留出时间" },
+      { ...base, fromDate: "2026-11-20", date: "2026-11-21" },
+      { ...base, fromDate: "2026-11-21", date: "2026-11-22" },
+    ],
+  });
+  const [proposal] = planned.proposals;
+  const accepted = applyCommand(planned, {
+    type: "resolve",
+    proposalId: proposal.id,
+    cardIds: [proposal.cards[0].id],
+    accept: true,
+  });
+  assert.deepEqual(
+    accepted.arrangements.map(({ date }) => date),
+    ["2026-11-22"],
+  );
+});
+
 test("数据库Agent整轮事务失败保持原状态并检查版本", () => {
   const db = new WorkspaceDatabase(":memory:");
   const initial = db.load();

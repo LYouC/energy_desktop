@@ -24,18 +24,18 @@
       <nav class="scenarios" aria-label="选择流程场景">
         <button type="button" data-scenario="advice" aria-pressed="true">分析建议</button>
         <button type="button" data-scenario="direct" aria-pressed="false">明确修改</button>
-        <button type="button" data-scenario="accept" aria-pressed="false">接受方案</button>
+        <button type="button" data-scenario="accept" aria-pressed="false">确认调整卡</button>
         <button type="button" data-scenario="cancel" aria-pressed="false">取消与失败</button>
       </nav>
       <section class="example" aria-label="用户输入示例"><small id="scenario-label"></small><p id="example"></p></section>
       <div class="layout">
         <ol class="flow" aria-label="执行顺序">
           <li class="node" data-step="0"><div class="step-meta"><span class="number">1</span><span class="step-state"></span></div><h3>用户发起对话</h3><p>捕获当前会话与输入，通过受控 IPC 发起一次运行。</p><code>src/renderer/components/ChatPanel.vue</code></li>
-          <li class="node" data-step="1"><div class="step-meta"><span class="number">2</span><span class="step-state"></span></div><h3>读取最新上下文</h3><p>保存用户消息，读取任务、背景、能量、安排和待处理方案。</p><code>src/agent/runtime.ts<br />src/agent/context.ts</code></li>
+          <li class="node" data-step="1"><div class="step-meta"><span class="number">2</span><span class="step-state"></span></div><h3>读取最新上下文</h3><p>保存用户消息，读取任务、背景、能量、安排和待接受调整卡。</p><code>src/agent/runtime.ts<br />src/agent/context.ts</code></li>
           <li class="node" data-step="2"><div class="step-meta"><span class="number">3</span><span class="step-state"></span></div><h3>模型判断与工具循环</h3><p>AI SDK Core 组织一次工具循环，按需查询并提交本轮完整结果。</p><code>src/agent/runtime.ts</code></li>
-          <li class="node" data-step="3"><div class="step-meta"><span class="number">4</span><span class="step-state"></span></div><h3>校验并预演变更</h3><p>校验结构、引用与业务范围，将模型标记为待协商的动作转成方案。</p><code>src/agent/turn.ts<br />src/domain/operations.ts</code></li>
+          <li class="node" data-step="3"><div class="step-meta"><span class="number">4</span><span class="step-state"></span></div><h3>校验并预演变更</h3><p>校验结构、引用和业务范围，按任务合并待定动作并试应用整张卡。</p><code>src/agent/turn.ts<br />src/domain/operations.ts</code></li>
           <li class="node" data-step="4"><div class="step-meta"><span class="number">5</span><span class="step-state"></span></div><h3>本地事务提交</h3><p>核对版本，原子保存本轮回复、背景、正式变更或待接受方案。</p><code>src/persistence/storage.ts</code></li>
-          <li class="node" data-step="5"><div class="step-meta"><span class="number">6</span><span class="step-state"></span></div><h3>界面展示保存结果</h3><p>刷新任务和方案，保留继续协商、逐项接受及错误恢复入口。</p><code>src/renderer/components/ChatPanel.vue</code></li>
+          <li class="node" data-step="5"><div class="step-meta"><span class="number">6</span><span class="step-state"></span></div><h3>界面展示保存结果</h3><p>刷新任务和调整卡，显示每张卡的确认状态与错误恢复入口。</p><code>src/renderer/components/ChatPanel.vue</code></li>
         </ol>
         <section class="detail" aria-live="polite" aria-atomic="true">
           <div class="progress" id="progress"></div>
@@ -46,16 +46,16 @@
         </section>
       </div>
       <section class="guardrails" aria-label="贯穿流程的规则">
-        <div><h3>选择权跟随本轮意图</h3><p>“帮我分析”生成建议。“把英语移到明天”授权具体修改。“只接受英语”只应用对应部分。含糊指代需要核实。</p></div>
+        <div><h3>选择权跟随本轮意图</h3><p>“帮我分析”生成建议。“把英语移到明天”授权具体修改。“只接受英语”只应用英语整张调整卡。含糊指代需要核实。</p></div>
         <div><h3>能量与分析独立</h3><p>手动改变能量只保存状态。主动发送消息后，Agent 才读取最新状态并分析。休息或完成任务的效果通过用户反馈了解。</p></div>
         <div><h3>凭据留在调用层</h3><p>本地配置向模型服务提供认证。模型看到任务和会话上下文，Key 通过服务请求的认证通道使用。</p></div>
       </section>
       <details>
         <summary>查看编排、校验与模块职责</summary>
         <div class="technical">
-          <p><code>runtime.ts</code> 使用真实对话轮次，每轮最多六个模型步骤，超时一百二十秒。<code>readTask</code> 查询任务，<code>readConversation</code> 查阅当前会话历史，<code>calculateCapacity</code> 核算时间。模型用 <code>prepareTurn</code> 提交交流或操作的语义决定、具体动作与可选记忆。程序预演并返回回执，模型随后生成自然语言终答。本轮完整结果通过一次事务保存。</p>
+          <p><code>runtime.ts</code> 使用真实对话轮次，每轮最多六个模型步骤，超时一百二十秒。<code>readTask</code> 查询任务，<code>readConversation</code> 查阅当前会话历史，<code>calculateCapacity</code> 核算时间。模型用 <code>prepareTurn</code> 提交交流或操作的语义决定、具体动作与可选记忆。程序预演本轮动作，对每张新卡试应用并返回回执，模型随后生成自然语言终答。本轮完整结果通过一次事务保存。</p>
           <p><code>src/agent/turn.ts</code> 把模型选定的动作转换成有限业务操作。任务属性和字段归属见 <a href="产品需求.md">产品需求</a>。创建时机、授权和指代由模型理解，程序检查结构、任务关系、会话归属和版本。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。</p>
-          <p><code>operations.ts</code> 维护任务关系、完成状态和方案接受规则。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量、偏好和会话记忆的快照。<code>storage.ts</code> 在事务内检查数据版本，一次保存本轮操作、记忆与最终回复。</p>
+          <p>对话通过 <code>resolve</code> 引用当前会话的 <code>proposalId</code> 和 <code>cardIds</code>，界面的确认按钮提交单张卡。<code>operations.ts</code> 按整卡校验和应用变更。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量、偏好和会话记忆的快照。<code>storage.ts</code> 在事务内检查数据版本，一次保存本轮操作、记忆与最终回复。</p>
           <p><code>config.ts</code> 管理 HTTPS 服务地址、模型与凭据。设置界面输入的 Key 使用 Electron <code>safeStorage</code> 加密保存，也可从执行进程的环境变量读取。界面查询配置只取得服务地址、模型及是否已配置 Key。更换服务地址时需提供相应凭据。</p>
           <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。模型先决定操作并读取回执，随后生成的自然语言正文支持流式预览。工具步骤中的文字属于中间过程，正式业务变更与会话记录以事务保存成功为准。</p>
           <p>系统边界见 <a href="技术方案.md">技术方案</a>。对话场景与结果分别见 <a href="Agent场景用例.md">Agent 场景用例</a> 和 <a href="Agent验证记录.md">Agent 验证记录</a>。</p>
@@ -71,9 +71,9 @@
             ["发送消息才开始分析", "用户发送后，界面锁定本次会话与运行标识。切换主题、导航和手动修改能量走各自的数据入口。", "本轮输入交给本地服务。"],
             ["把真实条件交给模型", "本地服务保存这条用户消息，重新组装当前任务、真实截止、今日范围、最新能量、背景和近期协商。", "保存用户消息，读取最新业务状态。"],
             ["综合约束提出一份建议", "模型结合一小时条件和已有背景判断先做什么、做到哪里、保住什么。必要时调用有限查询工具，随后提交本轮说明与建议变更。", "工具中间结果暂存于本轮运行。"],
-            ["将新建议保存为待接受方案", "结构与业务校验检查涉及的任务、日期、版本和变更范围。Agent 新提出的调整进入待接受方案，用户可以逐项接受。", "形成完整待提交回复与方案。"],
+            ["按任务生成待接受调整卡", "同轮同任务的安排和字段变更汇总到一张卡。每张卡有一条理由，程序试应用整卡并核对任务、日期和版本。", "预演生成待保存的卡，正式任务和安排保持原样。"],
             ["回复和方案一起保存", "事务核对运行所依据的数据版本，将回复与待接受方案一起提交。相关数据变化时返回冲突，保留后续重新分析入口。", "新增回复与待接受方案，原安排继续有效。"],
-            ["看清建议和已经生效的安排", "界面读取保存结果，展示方案理由、今日范围和接受状态。用户选择某项后，业务层只应用被接受的部分。", "用户可以继续协商或逐项接受方案。"]
+            ["看清每张卡的结果和状态", "界面展示调整后的安排、字段变化和一条理由。用户可以整张接受或拒绝，不同任务的独立卡可以分别处理。", "待接受卡仍未改变正式计划。"]
           ]
         },
         direct: {
@@ -89,15 +89,15 @@
           ]
         },
         accept: {
-          label: "当前会话已有方案 · 接受其中一项",
-          example: "只接受英语改期，报告还是按原来的。",
+          label: "当前会话已有两张调整卡 · 只接受英语",
+          example: "英语那张卡按建议改到明天，报告那张先不动。",
           steps: [
-            ["发送本轮接受范围", "用户可以通过对话表达，也可以点击方案中的接受按钮。这里演示通过对话接受当前会话的一项变更。", "发送原文接受范围。"],
-            ["读取当前会话的待处理方案", "服务保存消息，读取方案标识、每项接受状态和关联任务的最新版本，明确英语和报告分别对应哪项。", "保存用户消息，读取待接受方案。"],
-            ["解析只接受哪一项", "模型提交当前会话方案的对应变更标识。若存在多个可能指向，先核实；若变更依赖其他步骤，解释依赖并协商范围。", "准备有限的接受操作。"],
-            ["检查方案归属与条目状态", "程序核对方案所属会话及模型提交的条目标识。已拒绝或已接受的条目按业务规则处理。", "确认待执行的接受范围。"],
-            ["应用接受部分并记录状态", "事务验证任务版本，只执行英语对应变更并更新方案状态。重复提交已经应用的接受操作不会重复创建安排。", "英语调整生效，报告继续原安排。"],
-            ["展示部分接受", "方案条目显示已经接受或拒绝的结果，今日安排反映真正生效的部分。后续继续协商时使用最新数据。", "接受结果与任务变化能够相互核对。"]
+            ["指定要确认的任务卡", "英语卡包含今日改期和预计完成日期联动。用户可以说只接受英语，也可以点击英语卡的接受按钮。这里演示对话确认。", "发送用户的原话。"],
+            ["读取当前会话的待接受卡", "服务保存消息，读取方案与卡片标识、确认状态和相关任务的最新版本。", "保存用户消息，读取英语卡和报告卡。"],
+            ["解析确认范围", "模型用 resolve 引用英语对应的方案和卡片。若指代有歧义，先核实；若用户明确指定新的操作范围，按新指令执行。", "准备确认英语整张卡。"],
+            ["校验整张卡", "程序核对当前会话、卡片状态、版本和业务规则。任一变更校验失败时，保留原数据和待接受状态，提示重新分析。", "校验通过后准备提交整张卡。"],
+            ["原子应用卡内变更", "事务一并保存英语的安排、预计完成日期和卡片状态。拒绝只变更卡片状态，已经处理的卡不会重复执行。", "英语的安排和预计完成日期一起更新，报告保留原安排。"],
+            ["展示两张卡各自的状态", "英语卡显示已接受，报告卡仍待接受。任务与今日安排反映已保存的结果。", "报告可以继续协商或单独确认。"]
           ]
         },
         cancel: {

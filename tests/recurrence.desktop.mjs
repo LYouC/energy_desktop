@@ -199,11 +199,9 @@ try {
     const sessionId = state.activeSessionId;
     const proposalId = crypto.randomUUID();
     const pending = {
-      reason: "用户希望先看建议",
       date: occurrence.date,
       scope: "",
       children: [],
-      status: "pending",
     };
     await window.desktop.execute(state.revision, {
       type: "reply",
@@ -219,7 +217,7 @@ try {
         id: proposalId,
         sessionId,
         createdAt: new Date().toISOString(),
-        changes: [
+        cards: [
           {
             ...pending,
             id: crypto.randomUUID(),
@@ -239,7 +237,14 @@ try {
             occurrence,
             done: false,
           },
-        ],
+        ].map((change) => ({
+          id: crypto.randomUUID(),
+          taskId: change.taskId,
+          title: change.label,
+          reason: "用户希望先看建议",
+          status: "pending",
+          changes: [change],
+        })),
       },
     });
   });
@@ -247,11 +252,11 @@ try {
   const plan = page.locator(".proposal");
   await expect(plan).toContainText("每天");
   await expect(plan).toContainText("恢复为未完成");
-  await plan
-    .getByRole("button", { name: "接受这项", exact: true })
-    .first()
-    .click();
-  await expect(plan).toContainText("部分接受");
+  await plan.getByRole("button", { name: "接受", exact: true }).first().click();
+  await expect(plan.locator(".proposal-change").first()).toContainText(
+    "已接受",
+  );
+  await expect(plan.locator(".proposal-change").last()).toContainText("待接受");
   const accepted = await page.evaluate(() => window.desktop.load());
   expect(
     accepted.tasks.find((item) => item.title === "整理纪要").recurrence,

@@ -21,7 +21,7 @@
 
 Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑属性复用子任务字段，拆分时所属任务由父任务确定。子任务可仅提供名称，也可保存自己的说明、状态与预计起止日期。旧方案读取时将 children.goal 转入 description，新工具协议拒绝旧字段，避免静默丢失内容。子任务日期沿用普通任务校验。
 
-`model.ts` 定义任务、按日期安排、方案、会话和有限 Command。`operations.ts` 是业务变更入口，返回独立的新状态，失败时原状态完整保留。任务版本用于识别旧方案，状态 revision 用于持久化并发校验。方案支持部分接受与幂等重试。
+`model.ts` 定义任务、按日期安排、方案、会话和有限 Command。`operations.ts` 是业务变更入口，返回独立的新状态，失败时原状态完整保留。任务版本用于识别旧方案，状态 revision 用于持久化并发校验。方案按任务保存调整卡，卡内共用理由和状态。`resolve` 通过 `proposalId` 和 `cardIds` 选择完整卡片。接受时在同一份状态中校验并应用卡内动作，失败时保留原业务数据和卡片状态。拒绝只变更卡片状态，重复决定不重复执行。旧方案仍按原条目分别处理。
 
 今日阶段完成只记录当天结果，任务整体完成由用户单独设置。完成父项会在同一命令中完成仍有当天安排的后代，忽略已经移除和未安排的任务。恢复只改目标项，子任务完成不自动完成父任务。删除父任务会删除后代，界面必须明确展示此范围。
 
@@ -37,4 +37,4 @@ Agent 动作与草稿均已使用新属性。childTaskSchema 从任务可编辑�
 
 一键优化以 `source: "optimizeToday"` 标记并保存用户消息，保留同一会话的草稿。普通用户消息仍清空草稿，旧消息无需迁移。
 
-`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。`agent-recurrence.test.ts` 覆盖对话动作、部分接受、跨日及混合操作回滚。
+`npm test` 中的 `domain.test.ts`、`workspace.test.ts`、`conversations.test.ts` 和 `task-fields.test.ts` 覆盖状态变更、方案、会话和任务日期规则。`recurrence.test.ts` 覆盖日期结算、同日复用、规则编辑、移除撤销和模板删除。`agent-domain.test.ts` 覆盖同任务整卡确认、跨任务独立确认和幂等。`agent-recurrence.test.ts` 覆盖对话动作、模板与实例同卡、跨日及混合操作回滚。

@@ -32,7 +32,7 @@ export function simulateReply(
       proposal: null,
     };
   }
-  const changes: Change[] = [];
+  const changes: (Change & { reason: string })[] = [];
   if (/拆分/.test(text)) {
     changes.push({
       id: crypto.randomUUID(),
@@ -43,7 +43,6 @@ export function simulateReply(
       type: "split",
       date: "",
       scope: "",
-      status: "pending",
       children: [
         {
           title: "整理已有材料与缺口",
@@ -71,7 +70,6 @@ export function simulateReply(
         date: localDate(),
         scope: `推进「${task.title}」，先明确一个具体产出`,
         children: [],
-        status: "pending",
       });
     }
   }
@@ -79,7 +77,14 @@ export function simulateReply(
     id: crypto.randomUUID(),
     sessionId,
     createdAt: new Date().toISOString(),
-    changes,
+    cards: changes.map(({ reason, ...change }) => ({
+      id: crypto.randomUUID(),
+      taskId: change.taskId,
+      title: change.label,
+      reason,
+      status: "pending",
+      changes: [change],
+    })),
   };
   return {
     text: `已读取最新状态「${context.energy.value ?? "尚未说明"}」、今日安排和 ${context.unfinishedTasks.length} 项未完成任务。\n\n下面是用于试操作的模拟方案。请逐项检查今日范围与真实时间条件，再接受需要的部分。任务价值、容量冲突和精力适配，留待真实 Agent 接入后验证。`,

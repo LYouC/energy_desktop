@@ -11,7 +11,7 @@
 
 本模块复用[领域模型与命令](../domain/README.md)。运行层接收工作区读写接口，由[桌面宿主](../desktop/README.md)接入 SQLite 和 IPC。配置从宿主接收凭据加密能力。
 
-`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、部分接受、阶段收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。
+`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、整卡确认与明确缩小授权范围、阶段收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。
 
 ## 调用与数据流
 
@@ -42,13 +42,13 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 | `calculateCapacity` | 计算可用时间、任务估时和缓冲的容量关系                 |
 | `prepareTurn`       | 提交 intent、actions 及可选 memory，预演后返回业务回执 |
 
-`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝方案条目。
+`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝整张任务调整卡。
 
 重复任务在 `createTask` 动作顶层填写 `recurrence`。已有任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除重复任务。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效，拆分重复父任务生成的子任务跟随父规则。删除同时删除后代任务并保留已生成的本地实例。存在子任务时需明确指定 `includeChildren`。
 
 当天可用 `createOccurrence` 补加规则外的一次执行，使用 `updateOccurrenceScope`、`setOccurrenceDone`、`skipOccurrence`、`restoreOccurrence` 操作已有实例。均使用 taskId 和本地日期。同一日期已有安排或移除记录时使用相应操作。现存实例的方案核对实例版本和快照；改模板标题或规则本身不使实例方案过期。完成父项时核对方案原先列出的当日子项范围。回执返回规则、今日结果、移除记录、删除模板和待接受条目。
 
-`turn.ts` 定义这些动作。创建时机、用户授权、否定、指代和接受范围由模型结合对话语义判断，应用自动绑定真实用户消息作为来源，程序校验结构、ID、会话归属、版本及业务一致性。新增计划建议保存为待接受方案，已授权操作直接执行。
+`turn.ts` 定义这些动作。运行层先保存用户原话。模型结合对话判断创建时机、授权、否定、指代和接受范围，程序校验结构、ID、会话归属、版本及业务一致性。同轮同任务的待定动作合成一张调整卡，包含一条理由。会话上下文在 `pendingProposals` 中提供方案和卡片。模型用 `resolve` 的 `proposalId` 与 `cardIds` 引用已有卡，试应用的回执提供卡片内容和处理状态。明确授权的具体操作直接执行。每张新卡先在内存中试应用，缺少理由或业务校验失败时在同一工具循环修正。仅与源任务字段联动的改派归源任务卡，单独改派归承接任务卡。两端都还有待定字段变更时先协商影响范围。连续移期只有在中间日期没有原安排及较早新增安排时，才合并为起点到最终日期。
 
 创建和修改的 patch 及会话 taskDraft 使用 `title/status/startDate/expectedDate/description/parentId`，工具回执与草稿展示同步返回预计日期和说明。`split.children` 支持名称、说明、状态和预计日期，父任务由 split.taskId 确定。`createTask.ref` 可供同批动作的 taskId 和 patch.parentId 引用。持久化层读取旧拆分时将 goal 转入说明，模型工具对旧字段报错，供同一循环修正。上下文和 `readTask` 提供用户标注的 `importance`，供规划时参考。标注由任务编辑器写入。
 

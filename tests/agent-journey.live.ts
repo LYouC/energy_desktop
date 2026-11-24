@@ -119,12 +119,20 @@ await run(
     assert.equal(next.arrangements.length, 0, "建议尚未接受，不能提前安排");
     assert(
       next.proposals.some((p) =>
-        p.changes.some((c) => c.type === "split" && c.status === "pending"),
+        p.cards.some(
+          (card) =>
+            card.status === "pending" &&
+            card.changes.some((change) => change.type === "split"),
+        ),
       ),
     );
     assert(
       next.proposals.some((p) =>
-        p.changes.some((c) => c.type === "schedule" && c.status === "pending"),
+        p.cards.some(
+          (card) =>
+            card.status === "pending" &&
+            card.changes.some((change) => change.type === "schedule"),
+        ),
       ),
     );
   },

@@ -27,18 +27,25 @@ function proposalFor(state: State): Proposal {
     id: crypto.randomUUID(),
     sessionId: state.activeSessionId,
     createdAt: new Date().toISOString(),
-    changes: [
+    cards: [
       {
         id: crypto.randomUUID(),
         taskId: task.id,
-        taskVersion: task.version,
-        type: "schedule",
-        date: "2026-11-16",
-        scope: "初稿",
-        children: [],
-        label: "安排",
+        title: task.title,
         reason: "测试",
         status: "pending",
+        changes: [
+          {
+            id: crypto.randomUUID(),
+            taskId: task.id,
+            taskVersion: task.version,
+            type: "schedule",
+            date: "2026-11-16",
+            scope: "初稿",
+            children: [],
+            label: "安排",
+          },
+        ],
       },
     ],
   };
@@ -107,7 +114,7 @@ test("删除父任务清理后代、安排与待处理方案", () => {
     ["相关工作"],
   );
   assert.equal(state.arrangements.length, 1);
-  assert.equal(state.proposals[0].changes[0].status, "rejected");
+  assert.equal(state.proposals[0].cards[0].status, "rejected");
 });
 
 test("按日安排与移动只影响对应日期，同日更新保持唯一", () => {
@@ -192,10 +199,10 @@ for (const date of ["2026-02-30", "2026-13-01", "2026-00-01"])
     );
   });
 
-test("方案变更 ID 唯一，所属会话必须存在", () => {
+test("调整卡 ID 唯一，所属会话必须存在", () => {
   const state = taskState();
   const proposal = proposalFor(state);
-  proposal.changes.push(structuredClone(proposal.changes[0]));
+  proposal.cards.push(structuredClone(proposal.cards[0]));
   assert.throws(() => applyCommand(state, { type: "proposal", proposal }));
   const foreign = { ...proposalFor(state), sessionId: "missing" };
   assert.throws(() =>
@@ -203,11 +210,11 @@ test("方案变更 ID 唯一，所属会话必须存在", () => {
   );
 });
 
-test("同任务方案分批接受及无效接受范围", () => {
+test("同任务方案整卡接受及无效接受范围", () => {
   let state = taskState();
   const proposal = proposalFor(state);
-  proposal.changes.push({
-    ...proposal.changes[0],
+  proposal.cards[0].changes.push({
+    ...proposal.cards[0].changes[0],
     id: crypto.randomUUID(),
     type: "split",
     children: [{ title: "第一步", description: "产出" }],
@@ -218,20 +225,94 @@ test("同任务方案分批接受及无效接受范围", () => {
       applyCommand(state, {
         type: "resolve",
         proposalId: proposal.id,
-        ids: ["missing"],
+        cardIds: ["missing"],
         accept: true,
       }),
     /范围/,
   );
-  for (const change of proposal.changes)
-    state = applyCommand(state, {
-      type: "resolve",
-      proposalId: proposal.id,
-      ids: [change.id],
-      accept: true,
-    });
+  state = applyCommand(state, {
+    type: "resolve",
+    proposalId: proposal.id,
+    cardIds: [proposal.cards[0].id],
+    accept: true,
+  });
   assert.equal(state.arrangements.length, 1);
   assert.equal(state.tasks.length, 2);
+});
+
+test("v4 旧方案保留历史状态和同任务待定项的独立确认范围", () => {
+  const state = taskState();
+  const {
+    cards: [card],
+    ...proposal
+  } = proposalFor(state);
+  const oldChange = { ...card.changes[0], reason: "旧方案理由" };
+  const payload = {
+    ...state,
+    proposals: [
+      {
+        ...proposal,
+        changes: [
+          { ...oldChange, id: "history", status: "accepted" },
+          { ...oldChange, id: "schedule", status: "pending" },
+          {
+            ...oldChange,
+            id: "update",
+            type: "update",
+            status: "pending",
+            patch: { description: "继续补充" },
+          },
+        ],
+      },
+    ],
+  };
+  const filename = path.join(
+    mkdtempSync(path.join(tmpdir(), "xixu-proposal-v4-")),
+    "workspace.db",
+  );
+  const raw = new DatabaseSync(filename);
+  raw.exec(
+    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=4;",
+  );
+  raw
+    .prepare("INSERT INTO workspace VALUES (1, ?, ?)")
+    .run(state.revision, JSON.stringify(payload));
+  raw.close();
+  const db = new WorkspaceDatabase(filename);
+  const migrated = db.load();
+  assert.deepEqual(
+    migrated.proposals[0].cards.map(({ id, status }) => [id, status]),
+    [
+      ["history", "accepted"],
+      ["schedule", "pending"],
+      ["update", "pending"],
+    ],
+  );
+  assert.equal(migrated.proposals[0].cards[0].reason, oldChange.reason);
+  const resolve = {
+    type: "resolve" as const,
+    proposalId: proposal.id,
+    accept: true,
+  };
+  const scheduled = db.execute(migrated.revision, {
+    ...resolve,
+    cardIds: ["schedule"],
+  });
+  assert.equal(scheduled.tasks[0].description, "");
+  assert.equal(scheduled.proposals[0].cards[2].status, "pending");
+  db.close();
+  const reopened = new WorkspaceDatabase(filename);
+  try {
+    assert.deepEqual(reopened.load(), scheduled);
+    const updated = reopened.execute(scheduled.revision, {
+      ...resolve,
+      cardIds: ["update"],
+    });
+    assert.equal(updated.tasks[0].description, "继续补充");
+    assert.equal(updated.arrangements.length, 1);
+  } finally {
+    reopened.close();
+  }
 });
 
 test("回复与方案原子保存，失败不会留下孤立回复", () => {
@@ -248,7 +329,7 @@ test("回复与方案原子保存，失败不会留下孤立回复", () => {
   const valid = applyCommand(state, { type: "reply", message, proposal });
   assert.equal(valid.messages.length, 1);
   assert.equal(valid.proposals.length, 1);
-  proposal.changes[0].taskVersion = state.tasks[0].version + 1;
+  proposal.cards[0].changes[0].taskVersion = state.tasks[0].version + 1;
   assert.throws(
     () => applyCommand(state, { type: "reply", message, proposal }),
     /变化/,
@@ -343,11 +424,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=5");
+  db.exec("PRAGMA user_version=6");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 5);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 6);
   inspect.close();
 });
 
@@ -394,7 +475,7 @@ test("选择子任务后启动协助与拆分使用该子任务", () => {
     "拆分当前任务",
     child.id,
   );
-  assert.equal(split.proposal?.changes[0].taskId, child.id);
+  assert.equal(split.proposal?.cards[0].taskId, child.id);
   assert.equal(state.tasks.length, 2);
 });
 
@@ -407,6 +488,6 @@ test("模拟规划保持任务原状，空工作区返回可操作引导", () =>
   const state = taskState(),
     before = structuredClone(state);
   const result = simulateReply(state, state.activeSessionId, "规划今天", null);
-  assert.equal(result.proposal?.changes[0].status, "pending");
+  assert.equal(result.proposal?.cards[0].status, "pending");
   assert.deepEqual(state, before);
 });

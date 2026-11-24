@@ -74,11 +74,11 @@ export function buildContext(state: State, sessionId: string, date?: string) {
     recentMessages: messages.slice(-12),
     pendingProposals: state.proposals.flatMap((proposal) => {
       if (proposal.sessionId !== sessionId) return [];
-      const changes = proposal.changes.filter((change) =>
-        refersToCurrentTasks(change, taskIds),
+      const cards = proposal.cards.filter((card) =>
+        card.changes.every((change) => refersToCurrentTasks(change, taskIds)),
       );
-      return changes.some((change) => change.status === "pending")
-        ? [{ ...proposal, changes }]
+      return cards.some((card) => card.status === "pending")
+        ? [{ ...proposal, cards }]
         : [];
     }),
   };

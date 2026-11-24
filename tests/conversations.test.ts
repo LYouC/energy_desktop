@@ -32,7 +32,7 @@ test("删除当前会话只清理会话数据，选中最近会话并在删空�
       id: "proposal",
       sessionId: "second",
       createdAt: "2026-11-18T02:00:00.000Z",
-      changes: [],
+      cards: [],
     },
   });
   state = db.execute(state.revision, {

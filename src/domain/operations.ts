@@ -351,14 +351,17 @@ function deleteTask(state: State, id: string) {
       (item) => !ids.has(item.taskId),
     );
   for (const proposal of state.proposals)
-    for (const change of proposal.changes) {
+    for (const card of proposal.cards) {
       if (
-        (ids.has(change.taskId) ||
-          (change.fromTaskId && ids.has(change.fromTaskId))) &&
-        change.status === "pending" &&
-        (!isOccurrenceChange(change) || change.type === "createOccurrence")
+        card.status === "pending" &&
+        card.changes.some(
+          (change) =>
+            (ids.has(change.taskId) ||
+              (change.fromTaskId && ids.has(change.fromTaskId))) &&
+            (!isOccurrenceChange(change) || change.type === "createOccurrence"),
+        )
       )
-        change.status = "rejected";
+        card.status = "rejected";
     }
 }
 function updateOccurrenceScope(
@@ -529,13 +532,15 @@ function addProposal(
     throw new Error("方案所属对话不存在。");
   if (state.proposals.some((item) => item.id === proposal.id))
     throw new Error("方案已经存在。");
-  for (const change of proposal.changes) {
-    if (change.status !== "pending") throw new Error("新方案条目必须待接受。");
-    checkChangeVersion(state, change);
-    checkCompletionScope(state, change, date);
-    if (preview && isRecurringChange(change)) {
-      checkRecurringTarget(state, change, date);
-      applyRecurringChange(structuredClone(state), change, date, now);
+  for (const card of proposal.cards) {
+    if (card.status !== "pending") throw new Error("新调整卡必须待接受。");
+    for (const change of card.changes) {
+      checkChangeVersion(state, change);
+      checkCompletionScope(state, change, date);
+      if (preview && isRecurringChange(change)) {
+        checkRecurringTarget(state, change, date);
+        applyRecurringChange(structuredClone(state), change, date, now);
+      }
     }
   }
   state.proposals.push(proposal);
@@ -675,30 +680,31 @@ export function applyCommand(
         (item) => item.id === command.proposalId,
       );
       if (!proposal) throw new Error("找不到这份方案。");
-      const changes = [...new Set(command.ids)]
+      const cards = [...new Set(command.cardIds)]
         .map((id) => {
-          const change = proposal.changes.find((item) => item.id === id);
-          if (!change) throw new Error("接受范围无效。");
-          return change;
+          const card = proposal.cards.find((item) => item.id === id);
+          if (!card) throw new Error("调整卡范围无效。");
+          return card;
         })
-        .filter((change) => change.status === "pending");
-      if (command.accept) {
-        for (const change of changes) {
-          checkChangeVersion(state, change);
-          checkCompletionScope(state, change, date);
-          if (isRecurringChange(change))
-            checkRecurringTarget(state, change, date);
-          if (
-            change.fromTaskId &&
-            findTask(state, change.fromTaskId).version !==
-              change.fromTaskVersion
-          )
-            throw new Error("原安排所属任务已变化，这部分方案需要重新分析。");
-        }
+        .filter((card) => card.status === "pending");
+      if (!cards.length) return state;
+      for (const card of cards)
+        card.status = command.accept ? "accepted" : "rejected";
+      if (!command.accept) break;
+
+      const changes = cards.flatMap((card) => card.changes);
+      for (const change of changes) {
+        checkChangeVersion(state, change);
+        checkCompletionScope(state, change, date);
+        if (isRecurringChange(change))
+          checkRecurringTarget(state, change, date);
+        if (
+          change.fromTaskId &&
+          findTask(state, change.fromTaskId).version !== change.fromTaskVersion
+        )
+          throw new Error("原安排所属任务已变化，这张调整卡需要重新分析。");
       }
       for (const change of changes) {
-        change.status = command.accept ? "accepted" : "rejected";
-        if (!command.accept) continue;
         if (isRecurringChange(change)) {
           applyRecurringChange(state, change, date, now);
           continue;
@@ -768,20 +774,41 @@ export function applyCommand(
           synchronizeRecurrence(state, date);
         }
       }
-      // Sibling changes in this proposal stay applicable after an accepted part.
-      const affectedTasks = new Set(
+      const deletedTemplates = new Set(
         changes
-          .filter((change) => change.status === "accepted")
+          .filter((change) => change.type === "deleteRecurringTask")
           .flatMap((change) => [
             change.taskId,
-            ...(change.fromTaskId ? [change.fromTaskId] : []),
-            ...(change.type === "deleteRecurringTask"
-              ? (change.descendantIds ?? [])
-              : []),
+            ...(change.descendantIds ?? []),
           ]),
       );
-      for (const change of proposal.changes) {
-        if (change.status !== "pending") continue;
+      if (!proposal.legacy) {
+        // 同一方案确认了模板删除后，保留其他卡对仍存在的实例的操作资格。
+        for (const card of proposal.cards) {
+          if (card.status !== "pending" || !deletedTemplates.has(card.taskId))
+            continue;
+          for (const change of card.changes)
+            if (
+              isOccurrenceChange(change) &&
+              change.type !== "createOccurrence"
+            )
+              change.taskVersion = null;
+        }
+        break;
+      }
+      // 旧方案允许逐项确认，同任务的剩余待定项沿用原先的版本衔接。
+      const affectedTasks = new Set(
+        changes.flatMap((change) => [
+          change.taskId,
+          ...(change.fromTaskId ? [change.fromTaskId] : []),
+          ...(change.type === "deleteRecurringTask"
+            ? (change.descendantIds ?? [])
+            : []),
+        ]),
+      );
+      for (const card of proposal.cards) {
+        if (card.status !== "pending") continue;
+        const [change] = card.changes;
         if (affectedTasks.has(change.taskId))
           change.taskVersion =
             state.tasks.find((task) => task.id === change.taskId)?.version ??

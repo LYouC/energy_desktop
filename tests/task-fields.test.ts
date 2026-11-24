@@ -377,7 +377,7 @@ test("v1 数据库迁移保留任务、安排和会话，旧文本合入说明�
     done: false,
   });
   previous.sessions[0].draft = "未发送输入";
-  previous.proposals.push({
+  const previousProposal = {
     id: "old",
     sessionId: previous.activeSessionId,
     createdAt: new Date().toISOString(),
@@ -395,14 +395,17 @@ test("v1 数据库迁移保留任务、安排和会话，旧文本合入说明�
         status: "pending",
       },
     ],
-  });
+  };
   const raw = new DatabaseSync(filename);
   raw.exec(
     "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=1;",
   );
   raw
     .prepare("INSERT INTO workspace VALUES(1, ?, ?)")
-    .run(previous.revision, JSON.stringify(previous));
+    .run(
+      previous.revision,
+      JSON.stringify({ ...previous, proposals: [previousProposal] }),
+    );
   raw.close();
   const db = new WorkspaceDatabase(filename);
   const migrated = db.load();
@@ -416,7 +419,7 @@ test("v1 数据库迁移保留任务、安排和会话，旧文本合入说明�
   assert.equal("plannedDate" in migrated.tasks[0], false);
   assert.deepEqual(migrated.arrangements, previous.arrangements);
   assert.equal(migrated.sessions[0].draft, "未发送输入");
-  assert.equal(migrated.proposals[0].changes[0].status, "rejected");
+  assert.equal(migrated.proposals[0].cards[0].status, "rejected");
   db.close();
   const reopened = new WorkspaceDatabase(filename);
   assert.deepEqual(reopened.load(), migrated);

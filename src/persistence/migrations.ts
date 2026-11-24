@@ -1,4 +1,30 @@
-import { stateSchema, type State } from "../domain/model";
+import { legacyProposalSchema, stateSchema, type State } from "../domain/model";
+
+function adjustmentCards(proposals: unknown, invalidatePending = false) {
+  return legacyProposalSchema
+    .array()
+    .parse(proposals)
+    .map(({ changes, ...proposal }) => ({
+      ...proposal,
+      legacy: true as const,
+      cards: changes.map(({ reason, status, ...change }) => ({
+        id: change.id,
+        taskId: change.taskId,
+        title: change.label,
+        reason,
+        status: invalidatePending && status === "pending" ? "rejected" : status,
+        changes: [change],
+      })),
+    }));
+}
+
+export function migrateWorkspaceProposals(payload: string): State {
+  const previous = JSON.parse(payload);
+  return stateSchema.parse({
+    ...previous,
+    proposals: adjustmentCards(previous.proposals),
+  });
+}
 
 /** v1 的分散文本合入说明；推进日期不是开始日期，不能据此推断。 */
 export function migrateWorkspaceV1(payload: string): State {
@@ -35,15 +61,7 @@ export function migrateWorkspaceV1(payload: string): State {
     };
   });
   // 旧方案与待创建草稿绑定旧字段，失效处理，避免接受时悄悄丢掉旧修改。
-  const proposals = previous.proposals.map(
-    (proposal: State["proposals"][number]) => ({
-      ...proposal,
-      changes: proposal.changes.map((change) => ({
-        ...change,
-        status: change.status === "pending" ? "rejected" : change.status,
-      })),
-    }),
-  );
+  const proposals = adjustmentCards(previous.proposals, true);
   const sessions = previous.sessions.map(
     (session: State["sessions"][number]) => ({
       ...session,
