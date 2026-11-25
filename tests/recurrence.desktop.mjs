@@ -67,13 +67,17 @@ try {
   await editor.getByRole("button", { name: "保存任务", exact: true }).click();
   await expect(editor).toBeHidden();
   const template = page.locator(".task-list-row").filter({ hasText: "练英语" });
+  const historyEntry = page.getByRole("button", {
+    name: "重复记录",
+    exact: true,
+  });
+  const historyDialog = page.getByRole("dialog", { name: "重复记录" });
+  await expect(historyEntry).toHaveCount(0);
+  await expect(historyDialog).toHaveCount(0);
   await page
     .getByRole("combobox", { name: "按任务类型筛选" })
     .selectOption("single");
   await expect(template).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "重复记录", exact: true }),
-  ).toBeVisible();
   await page
     .getByRole("combobox", { name: "按任务类型筛选" })
     .selectOption("repeated");
@@ -85,9 +89,6 @@ try {
   const search = page.getByRole("textbox", { name: "搜索任务" });
   await search.fill("不存在");
   await expect(template).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "重复记录", exact: true }),
-  ).toBeVisible();
   await search.clear();
 
   await page.getByRole("button", { name: /今日安排/ }).click();
@@ -126,6 +127,12 @@ try {
   await expect(occurrence).toHaveCount(1);
   await occurrence.getByRole("button", { name: "练英语", exact: true }).click();
   const occurrenceDialog = page.getByRole("dialog", { name: "本次详情" });
+  await expect(
+    occurrenceDialog.getByRole("button", { name: "查看重复设置" }),
+  ).toBeVisible();
+  await expect(
+    occurrenceDialog.getByRole("button", { name: "查看执行记录", exact: true }),
+  ).toHaveCount(0);
   await occurrenceDialog
     .getByRole("textbox", { name: "本次阶段目标" })
     .fill("跟读五分钟");
@@ -134,6 +141,10 @@ try {
 
   await page.getByRole("button", { name: /所有任务/ }).click();
   await template.click();
+  await expect(editor).toBeVisible();
+  await expect(
+    editor.getByRole("button", { name: "查看执行记录", exact: true }),
+  ).toHaveCount(0);
   await editor
     .getByRole("button", { name: "删除重复任务", exact: true })
     .click();
@@ -149,21 +160,21 @@ try {
     .locator("article.task-card")
     .filter({ hasText: "练英语" });
   await expect(restored).toContainText("跟读五分钟");
+  await restored.getByRole("button", { name: "练英语", exact: true }).click();
+  const restoredDialog = page.getByRole("dialog", { name: "本次详情" });
+  await expect(restoredDialog).toBeVisible();
+  await expect(
+    restoredDialog.getByRole("button", { name: "查看执行记录", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    restoredDialog.getByRole("button", { name: "查看重复设置" }),
+  ).toHaveCount(0);
+  await restoredDialog.getByRole("button", { name: "关闭" }).click();
   await restored.getByRole("button", { name: /完成(?:今日阶段|本次)/ }).click();
   await page.getByRole("button", { name: "已完成", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "已完成的今日阶段" }),
   ).toContainText("练英语");
-  await page.getByRole("button", { name: /所有任务/ }).click();
-  await page.getByRole("button", { name: "重复记录", exact: true }).click();
-  const history = page.getByRole("dialog", { name: "重复记录" });
-  await history
-    .getByRole("button", { name: "查看执行记录", exact: true })
-    .click();
-  await expect(history).toContainText("练英语");
-  await expect(history).toContainText("跟读五分钟");
-  await expect(history).toContainText(/完成\s*1\s*次/);
-  await history.getByRole("button", { name: "关闭", exact: true }).click();
 
   await page.getByRole("button", { name: /今日安排/ }).click();
   const ordinary = page
@@ -480,7 +491,7 @@ try {
   ).toBe(false);
   expect(errors).toEqual([]);
   console.log(
-    "PASS: recurring task editing, history, restart, transient undo and Agent proposal acceptance",
+    "PASS: recurring task editing, removed history entries, restart, transient undo and Agent proposal acceptance",
   );
 } finally {
   await app?.close();

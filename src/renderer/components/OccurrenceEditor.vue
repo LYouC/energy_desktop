@@ -6,7 +6,7 @@ import Button from "./ui/button/Button.vue";
 import Modal from "./Modal.vue";
 
 const props = defineProps<{ occurrence: Arrangement; task?: Task }>();
-const emit = defineEmits<{ close: []; settings: [Task]; history: [string] }>();
+const emit = defineEmits<{ close: []; settings: [Task] }>();
 const store = useWorkspace();
 const scope = ref(props.occurrence.scope);
 const error = ref("");
@@ -52,13 +52,6 @@ async function save() {
           variant="ghost"
           @click="emit('settings', task)"
           >查看重复设置</Button
-        >
-        <Button
-          v-else
-          type="button"
-          variant="ghost"
-          @click="emit('history', occurrence.taskId)"
-          >查看执行记录</Button
         >
         <Button type="submit" :disabled="busy || !scope.trim()"
           >保存本次范围</Button

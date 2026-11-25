@@ -24,7 +24,6 @@ const props = defineProps<{ task: Task; date: string; fromToday?: boolean }>();
 const emit = defineEmits<{
   close: [];
   edit: [task: Task];
-  history: [id: string];
 }>();
 const store = useWorkspace();
 const draft = ref<Task>(JSON.parse(JSON.stringify(props.task)));
@@ -311,30 +310,24 @@ async function remove() {
           @click="deleting = !deleting"
           >{{ savedRecurrence ? "删除重复任务" : "删除任务" }}</Button
         >
-        <Button
-          v-if="savedRecurrence"
-          type="button"
-          variant="ghost"
-          @click="emit('history', task.id)"
-          >查看执行记录</Button
-        >
         <Button type="submit" :disabled="busy">保存任务</Button>
       </div>
       <div v-if="deleting" class="notice">
         <p v-if="savedRecurrence">
           删除「{{
             task.title
-          }}」后，后续日期将停止生成安排。已经生成的重复实例（包括今天）会保留。它的子任务也会被删除。
+          }}」后，后续日期将停止生成安排。它的子任务也会被删除。
         </p>
         <p v-else>删除「{{ task.title }}」及其全部子任务和相关普通安排？</p>
-        <p v-if="repeatDescendants.length">
-          以下重复子任务也将停止生成安排。已生成的实例会保留。
-        </p>
+        <p v-if="repeatDescendants.length">以下重复子任务也将停止生成安排。</p>
         <ul v-if="repeatDescendants.length" class="delete-list">
           <li v-for="descendant in repeatDescendants" :key="descendant.id">
             {{ descendant.title }}
           </li>
         </ul>
+        <p v-if="savedRecurrence || repeatDescendants.length">
+          今天已生成的重复实例仍可处理。
+        </p>
         <Button
           type="button"
           variant="destructive"

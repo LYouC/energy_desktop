@@ -1273,32 +1273,6 @@ select[multiple] {
   gap: 4px 12px;
   padding-block: 5px;
 }
-.recurrence-history-heading {
-  flex-wrap: wrap;
-  margin: 14px 0 0;
-}
-.recurrence-history-summary {
-  margin: 4px 0 12px;
-}
-.recurrence-history-list {
-  list-style: none;
-  padding: 0;
-  margin: 14px 0 0;
-}
-.recurrence-history-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 9px 0;
-  border-top: 1px solid var(--line);
-}
-.recurrence-history-row > div {
-  flex: 1 1 160px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .form-section {
   border-top: 1px solid var(--line);
   padding-top: 20px;

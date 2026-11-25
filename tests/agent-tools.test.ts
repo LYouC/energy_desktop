@@ -363,7 +363,7 @@ test("SDK 仅在删除回执中说明已删模板，后续规划和读取不发�
         case 4:
           assert.match(receipt, /"deletedTasks":\["拉伸"\]/);
           assert.match(receipt, /"arrangements":\[\]/);
-          return response([], "已删除模板，执行记录仍在工作台。");
+          return response([], "已删除模板，今天这次仍可在今日安排中处理。");
         case 5: {
           const workspace = options.prompt.find((item) => item.role === "user");
           const text = workspace?.content.find(

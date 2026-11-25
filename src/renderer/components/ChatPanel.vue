@@ -357,7 +357,7 @@ function changeSummary(change: Change) {
     case "deleteRecurringTask": {
       const children = change.descendantIds?.length ?? 0;
       const scope = children ? `同时删除 ${children} 项子任务。 ` : "";
-      return `${scope}停止生成新实例，保留已生成的重复记录。`;
+      return `${scope}停止生成新实例。删除模板后，当天已有的实例仍可处理。`;
     }
     case "createOccurrence":
       return `补加 ${change.date} · ${change.scope}`;

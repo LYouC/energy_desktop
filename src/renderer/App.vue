@@ -30,7 +30,6 @@ import ManageToggle from "./components/ManageToggle.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import TaskCard from "./components/TaskCard.vue";
 import OccurrenceEditor from "./components/OccurrenceEditor.vue";
-import RecurrenceHistory from "./components/RecurrenceHistory.vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import WindowTitleBar from "./components/WindowTitleBar.vue";
 import { taskGroups, taskGroupRows } from "./lib/taskGroups";
@@ -65,7 +64,6 @@ const labels = { today: "今日安排", all: "所有任务", completed: "已完�
 const editor = ref<Task | null>(null);
 const editorFromToday = ref(false);
 const occurrence = ref<Arrangement | null>(null);
-const history = ref<{ taskId?: string } | null>(null);
 const settingsOpen = ref(false);
 const settingsError = ref("");
 const preferences = ref("");
@@ -464,11 +462,6 @@ function openOccurrence(item: Arrangement) {
   )
     ? item.taskId
     : null;
-}
-function openHistory(taskId?: string) {
-  editor.value = null;
-  occurrence.value = null;
-  history.value = { taskId };
 }
 const occurrenceTask = computed(() =>
   store.state.tasks.find((task) => task.id === occurrence.value?.taskId),
@@ -972,12 +965,6 @@ async function energy(event: Event) {
             </div>
             <div class="page-actions">
               <Button
-                v-if="view === 'all'"
-                variant="ghost"
-                @click="openHistory()"
-                >重复记录</Button
-              >
-              <Button
                 v-if="view === 'all' && !selecting"
                 variant="outline"
                 @click="addTask"
@@ -1222,7 +1209,7 @@ async function energy(event: Event) {
           以及另外 {{ deleteTargets.length - 5 }} 项
         </p>
         <div v-if="affectedTemplates.length" class="notice">
-          <p>以下重复任务将停止生成安排。已经生成的实例（包括今天）会保留。</p>
+          <p>以下重复任务将停止生成安排。今天已生成的实例仍可处理。</p>
           <ul class="delete-list">
             <li v-for="task in affectedTemplates" :key="task.id">
               {{ task.title }}
@@ -1250,7 +1237,6 @@ async function energy(event: Event) {
       :date="date"
       :from-today="editorFromToday"
       @edit="edit"
-      @history="openHistory"
       @close="editor = null"
     />
     <OccurrenceEditor
@@ -1259,13 +1245,6 @@ async function energy(event: Event) {
       :task="occurrenceTask"
       @close="occurrence = null"
       @settings="openEditor($event, true)"
-      @history="openHistory"
-    />
-    <RecurrenceHistory
-      v-if="history"
-      :date="date"
-      :task-id="history.taskId"
-      @close="history = null"
     />
     <Modal
       v-model:open="settingsOpen"

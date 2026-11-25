@@ -451,7 +451,9 @@ await run(
   "B09e 已删除模板不作为当前计划",
   deleted,
   "今天那次拉伸我已经做完了，帮我标记一下。",
-  ["说明当前计划没有该任务，可以从工作台查看或处理已保留的执行记录。"],
+  [
+    "说明当前计划没有该任务，可引导用户在「今日安排」手动处理今天已生成的实例。",
+  ],
   (_before, next) => {
     assert.deepEqual(next.tasks, []);
     assert.equal(next.arrangements.length, 1);

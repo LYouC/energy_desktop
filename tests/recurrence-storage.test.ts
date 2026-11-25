@@ -48,8 +48,8 @@ test("重复父任务的两个子任务跟随结算，次日重新开始", (t) =
   assert.deepEqual(day(), []);
 });
 
-test("删除模板后保留本地执行记录，Agent 的今日计划只包含现存任务", (t) => {
-  const date = "2026-11-23";
+test("删除模板后保留今日实例并停止生成，Agent 的今日计划只包含现存任务", (t) => {
+  let date = "2026-11-23";
   const db = new WorkspaceDatabase(":memory:", () => date);
   t.after(() => db.close());
   const removed = {
@@ -74,13 +74,25 @@ test("删除模板后保留本地执行记录，Agent 的今日计划只包含�
   execute({ type: "skipOccurrence", taskId: skipped.id, date });
   execute({ type: "deleteTask", id: skipped.id });
   const state = execute({ type: "deleteTask", id: removed.id });
-  assert.ok(state.arrangements.some((item) => item.taskId === removed.id));
+  assert.ok(
+    state.arrangements.some(
+      (item) => item.taskId === removed.id && item.date === date,
+    ),
+  );
   const context = buildContext(state, state.activeSessionId, date);
   assert.deepEqual(
     context.today.map((item) => item.taskId),
     [active.id],
   );
   assert.deepEqual(context.skippedToday, []);
+  date = "2026-11-24";
+  assert.deepEqual(
+    db
+      .load()
+      .arrangements.filter((item) => item.date === date)
+      .map((item) => item.taskId),
+    [active.id],
+  );
 });
 
 test("已有子任务获得父规则，父规则更新保留当天，独立规则继续生效", (t) => {
