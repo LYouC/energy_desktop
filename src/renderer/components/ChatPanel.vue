@@ -79,7 +79,8 @@ const hasPendingToday = computed(() => {
   );
 });
 const runError = ref("");
-const resolveError = ref("");
+const respondingCards = ref(new Set<string>());
+const responseErrors = ref(new Map<string, string>());
 type AgentRequest = Parameters<Window["desktop"]["sendAgent"]>[0];
 const retryRequest = shallowRef<AgentRequest>();
 const retryStatus = ref("");
@@ -106,7 +107,6 @@ watch(
   () => {
     cancel();
     runError.value = "";
-    resolveError.value = "";
     retryRequest.value = undefined;
     emptyOptimization.value = false;
     draft.value =
@@ -276,18 +276,19 @@ async function resolve(
   card: AdjustmentCard,
   accept: boolean,
 ) {
-  resolveError.value = "";
+  if (respondingCards.value.has(card.id)) return;
+  respondingCards.value.add(card.id);
   try {
     await store.dispatch({
-      type: "resolve",
+      type: "respondToCard",
       proposalId: proposal.id,
-      cardIds: [card.id],
+      cardId: card.id,
       accept,
     });
   } catch {
-    resolveError.value = accept
-      ? "这张调整卡未能应用。请重新分析后再接受。"
-      : "拒绝结果未能保存，请重试。";
+    responseErrors.value.set(card.id, "暂时无法保存卡片结果。");
+  } finally {
+    respondingCards.value.delete(card.id);
   }
 }
 async function switchSession(id: string) {
@@ -555,22 +556,36 @@ onBeforeUnmount(() => {
                   {{ summary }}
                 </p>
                 <p class="muted">{{ card.reason }}</p>
-                <span class="change-status">{{
-                  card.invalidated
-                    ? "已失效"
-                    : {
-                        pending: "待接受",
-                        accepted: "已接受 · 已生效",
-                        rejected: "已拒绝",
-                      }[card.status]
-                }}</span>
-                <div v-if="card.status === 'pending'" class="row">
+                <span v-if="card.status === 'accepted'" class="change-status"
+                  >已接受</span
+                >
+                <span
+                  v-else-if="card.status === 'rejected'"
+                  class="change-status"
+                  >已拒绝</span
+                >
+                <p
+                  v-else-if="
+                    card.status === 'failed' || responseErrors.has(card.id)
+                  "
+                  class="error"
+                  role="alert"
+                >
+                  执行失败：{{
+                    card.failureReason ||
+                    responseErrors.get(card.id) ||
+                    "无法应用卡片。"
+                  }}
+                </p>
+                <div v-else class="row">
                   <Button
                     variant="outline"
+                    :disabled="respondingCards.has(card.id)"
                     @click="resolve(proposal, card, true)"
                     >接受</Button
                   ><Button
                     variant="ghost"
+                    :disabled="respondingCards.has(card.id)"
                     @click="resolve(proposal, card, false)"
                     >拒绝</Button
                   >
@@ -598,9 +613,6 @@ onBeforeUnmount(() => {
           >
             重试本轮
           </Button>
-        </div>
-        <div v-if="resolveError" class="chat-error">
-          <p class="error" role="alert">{{ resolveError }}</p>
         </div>
       </div>
       <div class="chat-bottom">

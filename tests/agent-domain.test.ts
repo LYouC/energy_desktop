@@ -175,7 +175,9 @@ test("A20 今日优化同时看到已安排和待安排任务，部分推进整�
     cardIds: [proposal.cards[0].id],
     accept: true,
   };
-  assert.throws(() => applyCommand(proposed, resolve, tomorrow), /原建议当天/);
+  const acrossDays = applyCommand(proposed, resolve, tomorrow);
+  assert.equal(acrossDays.proposals[0].cards[0].status, "accepted");
+  assert.equal(acrossDays.arrangements.at(-1)?.date, date);
   const fresh = applyAgentTurn(
     proposed,
     state.activeSessionId,
@@ -632,7 +634,7 @@ test("同源替代方案接受一项后另一项失效，同批冲突原子回�
         cardIds: [proposal.cards[1].id],
         accept: true,
       }),
-    /原安排.*需要重新分析/,
+    /原安排已不存在/,
   );
   assert.deepEqual(state, acceptedBefore);
   assert.equal(state.arrangements.length, 1);

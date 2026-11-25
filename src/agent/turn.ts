@@ -84,12 +84,12 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     type: z.literal("schedule"),
     ...existingTask,
     date: z.iso.date(),
-    scope: z.string().min(1),
+    scope: z.string().min(1).describe("所安排任务或子任务的完整执行内容。"),
     fromDate: z.iso
       .date()
       .optional()
       .describe(
-        "仅移动已有安排时填写原日期。新增整项任务安排并保留原安排时省略。",
+        "仅移动已有安排时填写原日期，须与目标日期不同。新增整项任务安排并保留原安排时省略。",
       ),
   }),
 
@@ -102,11 +102,11 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     type: z
       .literal("updateArrangement")
       .describe(
-        "修改已存在安排的范围，taskId/date必须指向原安排。可选targetTaskId可将同一安排转给子任务或另一任务，源安排原子移除。",
+        "修改已存在的整项任务安排，taskId/date必须指向原安排。可选targetTaskId可将同一安排转给已有子任务或另一任务，源安排原子移除。",
       ),
     ...existingTask,
     date: z.iso.date(),
-    scope: z.string().min(1),
+    scope: z.string().min(1).describe("目标任务或子任务的完整执行内容。"),
     targetTaskId: z.string().optional(),
   }),
   z.object({
@@ -320,6 +320,8 @@ export function applyAgentTurn(
     }
     const sourceId = references.get(action.taskId) ?? action.taskId;
     const sourceTask = state.tasks.find((t) => t.id === sourceId);
+    if (action.type === "schedule" && action.fromDate === action.date)
+      throw new Error("移期的原日期和目标日期必须不同。");
     const occurrence =
       action.type === "updateOccurrenceScope" ||
       action.type === "setOccurrenceDone" ||

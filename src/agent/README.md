@@ -43,9 +43,9 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 | `calculateCapacity` | 计算可用时间、任务估时和缓冲的容量关系                 |
 | `prepareTurn`       | 提交 intent、actions 及可选 memory，预演后返回业务回执 |
 
-`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性、说明与普通任务整体状态，`split` 拆分子任务，`schedule` 新增整项普通安排或移期，`updateArrangement` 修改普通安排范围，`unschedule` 取消普通安排，`resolve` 接受或拒绝整张任务调整卡。部分工作通过独立任务、`split.children[].todayScope` 或已有安排范围表达；模型协议不再提供普通 `stage` 或专用 `advanceTask` 动作。
+`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性、说明与普通任务整体状态，`split` 把大任务拆成可独立完成的子任务，`schedule` 新增整项普通安排或移期，`updateArrangement` 修改整项普通安排或转给已有任务，`unschedule` 取消普通安排，`resolve` 接受或拒绝整张任务调整卡。需要将新子任务安排到当天时填 `split.children[].todayScope`。
 
-`readUpcomingTasks({days})` 从本轮工作区日期的次日开始，默认查七天，返回 `from/through/tasks`。查询复用今日入队资格，并排除预计今天完成的任务。按预计起止日期或窗口内未完成的普通安排命中，返回任务属性和窗口内待推进安排的日期与范围。整项提前完成用 `schedule` 提议今天的共享安排，部分工作用独立任务、拆分或 `updateArrangement` 表达。新增当天安排的调整卡接受时核对日期及入队资格，原安排与预计日期默认保留。明确指名的任务和改期仍按已有详情或安排流程处理。
+`readUpcomingTasks({days})` 从本轮工作区日期的次日开始，默认查七天，返回 `from/through/tasks`。查询复用今日入队资格，并排除预计今天完成的任务。按预计起止日期或窗口内未完成的普通安排命中，返回任务属性和窗口内待推进安排的日期与范围。对今日两区之外的已有任务提出新增今日安排时，整项安排和拆分后将子任务安排到今天都须选用本轮查询的候选。接受普通安排时使用卡片记录的目标日期，新增整项安排会校验该日期的入队资格。新增安排默认保留原安排与预计日期。移期要求原日期存在有效安排，且原日期与目标日期不同。
 
 重复任务在 `createTask` 动作顶层填写 `recurrence`。已有任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除重复任务。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效，拆分重复父任务生成的子任务跟随父规则。删除同时删除后代任务并保留已生成的本地实例。存在子任务时需明确指定 `includeChildren`。
 

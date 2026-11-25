@@ -206,6 +206,7 @@ try {
   await page.reload();
   const card = page.locator(".proposal-change");
   await expect(card).toHaveCount(1);
+  await expect(card.getByText("待接受", { exact: true })).toHaveCount(0);
   await expect(card).toContainText("2026-11-20 → 2026-11-21 · 核对发票");
   await expect(card).toContainText("预计开始：2026-11-19");
   await expect(card).toContainText("预计完成：2026-11-20 → 2026-11-21");
@@ -222,12 +223,64 @@ try {
   expect(pending.tasks[0].description).toBe("");
   expect(pending.arrangements.map(({ date }) => date)).toEqual(["2026-11-20"]);
   await accept.click();
-  await expect(card).toContainText("已接受 · 已生效");
+  await expect(card).toContainText("已接受");
   const applied = await page.evaluate(() => window.desktop.load());
   expect(applied.tasks[0].description).toBe("保留目标和硬截止");
   expect(applied.tasks[0].startDate).toBe("2026-11-19");
   expect(applied.tasks[0].expectedDate).toBe("2026-11-21");
   expect(applied.arrangements.map(({ date }) => date)).toEqual(["2026-11-21"]);
+
+  await page.evaluate(async () => {
+    let state = await window.desktop.load();
+    const taskId = crypto.randomUUID();
+    state = await window.desktop.execute(state.revision, {
+      type: "saveTask",
+      task: {
+        ...state.tasks[0],
+        id: taskId,
+        version: 0,
+        title: "之后会删除的任务",
+      },
+    });
+    const task = state.tasks.find(({ id }) => id === taskId);
+    const proposal = structuredClone(state.proposals[0]);
+    proposal.id = crypto.randomUUID();
+    proposal.cards[0].id = crypto.randomUUID();
+    proposal.cards[0].taskId = taskId;
+    proposal.cards[0].title = task.title;
+    proposal.cards[0].status = "pending";
+    for (const change of proposal.cards[0].changes) {
+      change.taskId = taskId;
+      change.taskVersion = task.version;
+    }
+    const next = await window.desktop.execute(state.revision, {
+      type: "reply",
+      message: {
+        id: crypto.randomUUID(),
+        sessionId: state.activeSessionId,
+        role: "assistant",
+        text: "另一项安排建议。",
+        createdAt: new Date().toISOString(),
+        proposalId: proposal.id,
+      },
+      proposal,
+    });
+    await window.desktop.execute(next.revision, {
+      type: "deleteTask",
+      id: task.id,
+    });
+  });
+  await page.reload();
+  const obsoleteCard = page.locator(".proposal-change").last();
+  await obsoleteCard.getByRole("button", { name: "接受", exact: true }).click();
+  await expect(obsoleteCard.getByRole("alert")).toHaveText(
+    "执行失败：任务已被删除。",
+  );
+  await expect(obsoleteCard.getByRole("button")).toHaveCount(0);
+  await page.reload();
+  await expect(obsoleteCard.getByRole("alert")).toHaveText(
+    "执行失败：任务已被删除。",
+  );
 
   await page.evaluate(async () => {
     let state = await window.desktop.load();

@@ -16,7 +16,7 @@ import {
   migrateWorkspaceV5,
 } from "./migrations";
 
-const workspaceVersion = 6;
+const workspaceVersion = 7;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -48,6 +48,10 @@ export class WorkspaceDatabase {
           this.writeSnapshot(migrateWorkspaceProposals(row.payload));
         } else if (row && version === 5) {
           this.writeSnapshot(migrateWorkspaceV5(row.payload));
+        } else if (row && version === 6) {
+          const migrated = stateSchema.parse(JSON.parse(row.payload));
+          migrated.revision++;
+          this.writeSnapshot(migrated);
         }
         this.db.exec(`PRAGMA user_version=${workspaceVersion}`);
       });
@@ -94,8 +98,10 @@ export class WorkspaceDatabase {
     return stateSchema.parse(JSON.parse(row.payload));
   }
   execute(revision: number, command: Command) {
-    return this.transact(revision, (previous, date) =>
-      applyCommand(previous, command, date),
+    // 卡片按 ID 和自身的任务版本校验，允许处理期间其他数据或日期已刷新。
+    return this.transact(
+      command.type === "respondToCard" ? undefined : revision,
+      (previous, date) => applyCommand(previous, command, date),
     );
   }
   commitAgentTurn(
@@ -113,7 +119,7 @@ export class WorkspaceDatabase {
     });
   }
   private transact(
-    revision: number,
+    revision: number | undefined,
     transform: (previous: State, date: string) => State,
   ) {
     const date = this.today();
@@ -123,7 +129,7 @@ export class WorkspaceDatabase {
         previous.revision++;
         this.writeSnapshot(previous);
       }
-      if (previous.revision !== revision) return null;
+      if (revision !== undefined && previous.revision !== revision) return null;
       const next = transform(previous, date);
       this.writeSnapshot(next);
       return next;

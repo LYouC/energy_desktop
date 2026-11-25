@@ -17,7 +17,7 @@
 
 `schedulableTodayTasks` 查询可新增当天安排的开放一次性任务，排除已有当天安排或移除记录的任务。`unscheduledTasksDue` 在此基础上按预计完成日期过滤。`scheduleToday` 与 `scheduleDueToday` 分别供所有任务和预计完成区使用，均在写入时重新核对本地日期和资格，并以任务名追加安排。
 
-Agent 新增当天整项安排的调整卡用 `todayOnly` 标记。在接受时重新核对日期及 `schedulableTodayTasks`，避免跨日写入或覆盖已有安排。v5 旧 `advanceTask` 待接受卡在升级时失效并保留历史，其他旧共享安排与阶段卡继续按原规则读取和处理。
+普通安排使用调整卡记录的目标日期。新增当天整项安排的旧标记 `todayOnly` 仍用于校验目标日期的入队资格，避免覆盖已有安排。界面通过 `respondToCard` 确认单张卡。业务校验失败时保留任务和安排，单独保存卡片失败原因。对话预演与提交共用严格的 `resolve`，失败会回滚并返回错误。
 
 `moveTodayGroups` 在同一次命令中交换两组当天待推进安排的相对位置，保留各组内部顺序。子任务同级调序使用 `move`。
 

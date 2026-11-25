@@ -27,7 +27,7 @@ import { z } from "zod";
 
 function findTask(state: State, id: string) {
   const task = state.tasks.find((item) => item.id === id);
-  if (!task) throw new Error("任务已被删除，请刷新后重试。");
+  if (!task) throw new Error("任务已被删除。");
   return task;
 }
 export function isTaskOpen(task: Task) {
@@ -177,7 +177,7 @@ function removeArrangement(state: State, taskId: string, date: string) {
   const index = state.arrangements.findIndex(
     (item) => item.taskId === taskId && item.date === date,
   );
-  if (index < 0) throw new Error("这项安排已变化。");
+  if (index < 0) throw new Error("原安排已不存在。");
   if (state.arrangements[index].recurrence)
     throw new Error("请从今天移除这次重复任务。");
   state.arrangements.splice(index, 1);
@@ -404,19 +404,6 @@ function deleteTask(state: State, id: string) {
     state.repeatCursors = state.repeatCursors.filter(
       (item) => !ids.has(item.taskId),
     );
-  for (const proposal of state.proposals)
-    for (const card of proposal.cards) {
-      if (
-        card.status === "pending" &&
-        card.changes.some(
-          (change) =>
-            (ids.has(change.taskId) ||
-              (change.fromTaskId && ids.has(change.fromTaskId))) &&
-            (!isOccurrenceChange(change) || change.type === "createOccurrence"),
-        )
-      )
-        card.status = "rejected";
-    }
 }
 function updateOccurrenceScope(
   state: State,
@@ -459,8 +446,20 @@ function checkChangeVersion(state: State, change: Change) {
     return;
   }
   const version = findTask(state, change.taskId).version;
-  if (version !== change.taskVersion)
+  if (version !== change.taskVersion) {
+    const sourceDate =
+      change.fromDate ?? (change.type === "unschedule" ? change.date : "");
+    if (
+      sourceDate &&
+      !state.arrangements.some(
+        (item) =>
+          item.taskId === (change.fromTaskId ?? change.taskId) &&
+          item.date === sourceDate,
+      )
+    )
+      throw new Error("原安排已不存在。");
     throw new Error("任务已变化，这部分方案需要重新分析。");
+  }
 }
 
 function checkRecurringTarget(state: State, change: Change, today: string) {
@@ -735,6 +734,36 @@ export function applyCommand(
       addProposal(state, command.proposal, date, now);
       break;
     }
+    case "respondToCard": {
+      const card = state.proposals
+        .find(({ id }) => id === command.proposalId)
+        ?.cards.find(({ id }) => id === command.cardId);
+      if (!card) throw new Error("找不到这张调整卡。");
+      if (card.status !== "pending") return state;
+      try {
+        return applyCommand(
+          state,
+          {
+            type: "resolve",
+            proposalId: command.proposalId,
+            cardIds: [command.cardId],
+            accept: command.accept,
+          },
+          date,
+        );
+      } catch (error) {
+        if (
+          !command.accept ||
+          !(error instanceof Error) ||
+          error instanceof z.ZodError
+        )
+          throw error;
+        // resolve 在副本中应用，失败后只保存界面卡片的执行结果。
+        card.status = "failed";
+        card.failureReason = error.message;
+      }
+      break;
+    }
     case "resolve": {
       const proposal = state.proposals.find(
         (item) => item.id === command.proposalId,
@@ -761,8 +790,17 @@ export function applyCommand(
         if (
           change.fromTaskId &&
           findTask(state, change.fromTaskId).version !== change.fromTaskVersion
-        )
+        ) {
+          if (
+            !state.arrangements.some(
+              (item) =>
+                item.taskId === change.fromTaskId &&
+                item.date === (change.fromDate ?? change.date),
+            )
+          )
+            throw new Error("原安排已不存在。");
           throw new Error("原安排所属任务已变化，这张调整卡需要重新分析。");
+        }
       }
       for (const change of changes) {
         if (isRecurringChange(change)) {
@@ -779,14 +817,12 @@ export function applyCommand(
           throw new Error("请选择对应的重复任务操作。");
         if (change.type === "schedule") {
           if (change.todayOnly) {
-            if (change.date !== date)
-              throw new Error("本地日期已变化，请重新生成提前推进建议。");
             if (
-              !schedulableTodayTasks(state, date).some(
+              !schedulableTodayTasks(state, change.date).some(
                 ({ id }) => id === change.taskId,
               )
             )
-              throw new Error("任务已有今日安排或已无法推进，请重新分析。");
+              throw new Error("目标日期已有安排，或任务已无法安排。");
           }
           // 同批较早的变更也可能已移除源安排，实际替换前再次检查，失败整批回滚。
           if (
@@ -831,13 +867,8 @@ export function applyCommand(
         } else {
           const parent = findTask(state, change.taskId);
           for (const { todayScope, ...child } of change.children) {
-            if (
-              todayScope &&
-              (change.date !== date || recurrences.get(parent.id))
-            )
-              throw new Error(
-                "只能将普通任务拆出的子任务安排到原建议当天，请重新分析。",
-              );
+            if (todayScope && recurrences.get(parent.id))
+              throw new Error("父任务已改为重复任务，无法按卡片安排子任务。");
             const task = {
               ...newTask(parent.id),
               ...child,
@@ -846,7 +877,7 @@ export function applyCommand(
             };
             checkDates(task);
             state.tasks.push(task);
-            if (todayScope) schedule(state, task.id, date, todayScope);
+            if (todayScope) schedule(state, task.id, change.date, todayScope);
           }
           parent.version++;
           synchronizeRecurrence(state, date);

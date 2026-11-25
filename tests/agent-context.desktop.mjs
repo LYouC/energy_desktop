@@ -180,7 +180,7 @@ try {
     .locator(".proposal")
     .getByRole("button", { name: "接受", exact: true })
     .click();
-  await expect(page.locator(".proposal")).toContainText("已接受 · 已生效");
+  await expect(page.locator(".proposal")).toContainText("已接受");
   const childCard = page
     .locator(".task-card.focused")
     .filter({ hasText: "写提纲" });

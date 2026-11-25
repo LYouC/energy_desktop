@@ -272,7 +272,12 @@ try {
   await expect(plan.locator(".proposal-change").first()).toContainText(
     "已接受",
   );
-  await expect(plan.locator(".proposal-change").last()).toContainText("待接受");
+  await expect(
+    plan
+      .locator(".proposal-change")
+      .last()
+      .getByRole("button", { name: "接受", exact: true }),
+  ).toBeVisible();
   const accepted = await page.evaluate(() => window.desktop.load());
   expect(
     accepted.tasks.find((item) => item.title === "整理纪要").recurrence,
@@ -282,6 +287,7 @@ try {
       .done,
   ).toBe(true);
   await plan.getByRole("button", { name: "拒绝", exact: true }).click();
+  await expect(plan.locator(".proposal-change").last()).toContainText("已拒绝");
 
   await page.getByRole("button", { name: "我的空间 本地保存" }).click();
   await page.getByLabel("主题").selectOption("dark");

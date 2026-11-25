@@ -163,6 +163,7 @@ export async function generateAgentTurn(options: {
     ...context.today.map(({ taskId }) => taskId),
     ...context.dueToday.map(({ id }) => id),
   ]);
+  const existingTaskIds = new Set(state.tasks.map(({ id }) => id));
   const schedulableTodayIds = new Set(
     schedulableTodayTasks(state, context.date).map(({ id }) => id),
   );
@@ -197,35 +198,30 @@ export async function generateAgentTurn(options: {
           throw new Error(
             "一键优化只允许提出待用户接受的方案，请改用 proposal 或仅交流。",
           );
-        if (
-          actions.some(
-            (action) =>
-              action.type === "schedule" &&
-              action.mode === "proposal" &&
-              !action.fromDate &&
-              action.date === context.date &&
-              !schedulableTodayIds.has(action.taskId) &&
-              state.tasks.some((task) => task.id === action.taskId),
+        for (const action of actions) {
+          if (action.mode !== "proposal") continue;
+          const schedulesToday =
+            action.type === "schedule" &&
+            !action.fromDate &&
+            action.date === context.date;
+          const splitsForToday =
+            action.type === "split" &&
+            action.children.some(({ todayScope }) => todayScope);
+          if (!schedulesToday && !splitsForToday) continue;
+          // 同轮新建的任务使用 ref，本轮已有任务按今日两区和候选筛选。
+          if (!existingTaskIds.has(action.taskId)) continue;
+          if (schedulesToday && !schedulableTodayIds.has(action.taskId))
+            throw new Error(
+              "任务当前不能新增今日安排，请重新核对状态或改用已有安排操作。",
+            );
+          if (
+            !todayTaskIds.has(action.taskId) &&
+            !upcomingTaskIds.has(action.taskId)
           )
-        )
-          throw new Error(
-            "任务当前不能新增今日安排，请重新核对状态或改用已有安排操作。",
-          );
-        if (
-          actions.some(
-            (action) =>
-              action.type === "schedule" &&
-              action.mode === "proposal" &&
-              !action.fromDate &&
-              action.date === context.date &&
-              !todayTaskIds.has(action.taskId) &&
-              schedulableTodayIds.has(action.taskId) &&
-              !upcomingTaskIds.has(action.taskId),
-          )
-        )
-          throw new Error(
-            "提前推进建议须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
-          );
+            throw new Error(
+              "提前推进建议须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
+            );
+        }
         const next = applyAgentTurn(
           state,
           sessionId,

@@ -26,6 +26,7 @@ mkdirSync("test-results", { recursive: true });
 let state = emptyState();
 let parentId = "";
 let originalExpectedDate = "";
+let outlineTaskId = "";
 const rounds: unknown[] = [];
 
 function save() {
@@ -153,6 +154,7 @@ if (parentId) {
       const task = next.tasks.find((t) => t.id === today[0].taskId)!;
       assert.equal(task.parentId, parentId);
       assert.match(today[0].scope + task.title, /提纲|大纲/);
+      outlineTaskId = task.id;
     },
   );
   await run(
@@ -173,13 +175,21 @@ if (parentId) {
     },
   );
   await run(
-    "S01-5 明确缩小今日范围",
+    "S01-5 改为安排可独立完成的子任务",
     "这个可以。我先列三个讨论问题，今天的范围就改成这个。",
     (_before, next) => {
       const today = next.arrangements.filter((a) => a.date === localDate());
       assert.equal(today.length, 1);
-      assert.match(today[0].scope, /三个|3个|3 个/);
-      assert.match(today[0].scope, /问题/);
+      const questions = next.tasks.find((task) => task.id === today[0].taskId);
+      assert(questions, "今日安排应指向子任务");
+      assert.notEqual(questions.id, outlineTaskId);
+      assert.notEqual(questions.status, "done");
+      assert(
+        [parentId, outlineTaskId].includes(questions.parentId ?? ""),
+        "列出讨论问题应是报告或提纲的子任务",
+      );
+      assert.match(questions.title, /问题/);
+      assert.match(questions.title + today[0].scope, /三个|3个|3 个/);
       const parent = next.tasks.find((t) => t.id === parentId)!;
       assert.match(parent.description, /复盘/);
       assert.match(parent.description, /周五|星期五|2026-\d{2}-\d{2}/);
@@ -188,28 +198,22 @@ if (parentId) {
     },
   );
   await run(
-    "S01-6 记录停点及阶段完成",
+    "S01-6 完成子任务并记录停点",
     "三个问题列出来了，今天先到这里，完整提纲还没做。记一下停点，下次继续。",
     (before, next) => {
       assert.notEqual(
         next.tasks.find((t) => t.id === parentId)?.status,
         "done",
       );
+      const outline = next.tasks.find((task) => task.id === outlineTaskId);
+      assert(outline, "保留未完成的提纲任务");
+      assert.notEqual(outline.status, "done");
       const previousToday = before.arrangements.filter(
         (a) => a.date === localDate(),
       );
-      assert.equal(
-        previousToday.length,
-        1,
-        "阶段结束应关联唯一已接受的今日范围",
-      );
-      assert.match(
-        previousToday[0].scope,
-        /三个|3个|3 个/,
-        "前轮应已将今日范围改为三个问题",
-      );
+      assert.equal(previousToday.length, 1, "前轮应有唯一的今日子任务安排");
       const completedToday = next.arrangements.find(
-        (a) => a.date === localDate(),
+        (a) => a.date === localDate() && a.taskId === previousToday[0].taskId,
       );
       const finished = next.tasks.find(
         (task) => task.id === completedToday?.taskId,

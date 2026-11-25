@@ -37,8 +37,8 @@ export function migrateWorkspaceV5(payload: string): State {
           (change) => change.type === "schedule" && change.todayOnly,
         )
       ) {
-        card.status = "rejected";
-        card.invalidated = true;
+        card.status = "failed";
+        card.failureReason = "该方案使用了已移除的单次推进功能。";
       }
   state.revision++;
   return state;

@@ -221,10 +221,9 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
     cardIds: [card.id],
     accept: true,
   };
-  assert.throws(
-    () => applyCommand(proposed, resolve, "2026-12-30"),
-    /本地日期已变化/,
-  );
+  const acrossDays = applyCommand(proposed, resolve, "2026-12-30");
+  assert.equal(acrossDays.proposals[0].cards[0].status, "accepted");
+  assert.equal(acrossDays.arrangements.at(-1)?.date, date);
   assert.equal(proposed.proposals[0].cards[0].status, "pending");
   const conflicting = applyAgentTurn(
     before,
@@ -258,7 +257,7 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
         },
         date,
       ),
-    /已有今日安排/,
+    /目标日期已有安排/,
   );
   assert.equal(conflicting.arrangements.at(-1)?.scope, "已确认的范围");
   const accepted = db.execute(proposed.revision, resolve);
@@ -335,6 +334,89 @@ test("今日已有安排时，Agent 不能用共享建议绕过当天入队校�
   assert.deepEqual(state.arrangements, [
     { taskId: task.id, date, scope: task.title, done: false },
   ]);
+});
+
+test("读取任务详情后，今日安排建议仍须命中候选", async () => {
+  const date = "2026-12-29";
+  const task = { ...newTask(), title: "整理发票" };
+  const state = applyCommand(emptyState(), { type: "saveTask", task }, date);
+  const schedule = {
+    type: "schedule",
+    taskId: task.id,
+    mode: "proposal",
+    date,
+    scope: task.title,
+    reason: "今天有余量。",
+  };
+  const model = new MockLanguageModelV4({
+    doStream: [
+      response([
+        { name: "readTask", input: { taskId: task.id } },
+        { name: "readUpcomingTasks", input: {} },
+      ]),
+      response([
+        {
+          name: "prepareTurn",
+          input: { intent: "changes", actions: [schedule] },
+        },
+      ]),
+      response([
+        {
+          name: "prepareTurn",
+          input: {
+            intent: "changes",
+            actions: [
+              {
+                type: "split",
+                taskId: task.id,
+                mode: "proposal",
+                reason: schedule.reason,
+                children: [
+                  { title: "核对一月份发票", todayScope: "核对全部一月发票" },
+                ],
+              },
+            ],
+          },
+        },
+      ]),
+      response([
+        {
+          name: "prepareTurn",
+          input: {
+            intent: "changes",
+            actions: [{ ...schedule, fromDate: date }],
+          },
+        },
+      ]),
+      response([
+        {
+          name: "prepareTurn",
+          input: { intent: "conversation", actions: [] },
+        },
+      ]),
+      response([], "本轮没有符合条件的安排建议。"),
+    ],
+  });
+  const { turn, trace } = await generateAgentTurn({
+    state,
+    sessionId: state.activeSessionId,
+    focusedId: task.id,
+    userText: "建议今天安排整理发票吗？",
+    connection,
+    model,
+    date,
+    signal: AbortSignal.timeout(10000),
+    emit: () => {},
+  });
+  const validationErrors = (trace.validationErrors ?? []).filter(
+    (error) => !error.startsWith("Error:"),
+  );
+  assert.deepEqual(validationErrors, [
+    "提前推进建议须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
+    "提前推进建议须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
+    "移期的原日期和目标日期必须不同。",
+  ]);
+  assert.deepEqual(turn.actions, []);
 });
 
 test("SDK 可由模板补加当天实例，终答收到单次范围和完成结果", async () => {

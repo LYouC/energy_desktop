@@ -92,7 +92,7 @@ test("子任务完成不自动完成父任务，关联循环和缺失目标被�
   );
 });
 
-test("删除父任务清理后代、安排与待处理方案", () => {
+test("删除父任务清理后代与安排，接受原卡时说明任务已删除", () => {
   let state = taskState();
   const parent = state.tasks[0];
   const child = { ...newTask(parent.id), title: "子任务" };
@@ -114,7 +114,56 @@ test("删除父任务清理后代、安排与待处理方案", () => {
     ["相关工作"],
   );
   assert.equal(state.arrangements.length, 1);
-  assert.equal(state.proposals[0].cards[0].status, "rejected");
+  const responded = applyCommand(state, {
+    type: "respondToCard",
+    proposalId: proposal.id,
+    cardId: proposal.cards[0].id,
+    accept: true,
+  });
+  assert.equal(responded.proposals[0].cards[0].status, "failed");
+  assert.match(
+    responded.proposals[0].cards[0].failureReason ?? "",
+    /任务已被删除/,
+  );
+  assert.deepEqual(responded.tasks, state.tasks);
+  assert.deepEqual(responded.arrangements, state.arrangements);
+});
+
+test("原安排被移走后接受旧卡，保存失败原因且整卡不生效", (t) => {
+  const db = new WorkspaceDatabase(":memory:");
+  t.after(() => db.close());
+  let state = db.execute(db.load().revision, {
+    type: "saveTask",
+    task: { ...newTask(), title: "报告" },
+  });
+  const task = state.tasks[0];
+  state = db.execute(state.revision, {
+    type: "schedule",
+    taskId: task.id,
+    date: "2026-11-27",
+    scope: "初稿",
+  });
+  const proposal = proposalFor(state);
+  proposal.cards[0].changes[0].fromDate = "2026-11-27";
+  const proposed = db.execute(state.revision, { type: "proposal", proposal });
+  const changed = db.execute(proposed.revision, {
+    type: "unschedule",
+    taskId: task.id,
+    date: "2026-11-27",
+  });
+  const response = {
+    type: "respondToCard" as const,
+    proposalId: proposal.id,
+    cardId: proposal.cards[0].id,
+    accept: true,
+  };
+  const failed = db.execute(proposed.revision, response);
+  assert.equal(failed.proposals[0].cards[0].status, "failed");
+  assert.equal(failed.proposals[0].cards[0].failureReason, "原安排已不存在。");
+  assert.deepEqual(db.load().arrangements, changed.arrangements);
+  assert.deepEqual(db.load().tasks, changed.tasks);
+  assert.deepEqual(db.load().messages, changed.messages);
+  assert.deepEqual(db.execute(failed.revision, response), failed);
 });
 
 test("按日安排与移动只影响对应日期，同日更新保持唯一", () => {
@@ -375,8 +424,8 @@ test("v5 旧提前推进方案失效，历史阶段与临时安排保留", () =>
   const db = new WorkspaceDatabase(filename, () => today);
   try {
     const migrated = db.load();
-    assert.equal(migrated.proposals[0].cards[0].status, "rejected");
-    assert.equal(migrated.proposals[0].cards[0].invalidated, true);
+    assert.equal(migrated.proposals[0].cards[0].status, "failed");
+    assert.match(migrated.proposals[0].cards[0].failureReason ?? "", /已移除/);
     assert.equal(migrated.proposals[0].cards[0].reason, "测试");
     assert.deepEqual(migrated.arrangements, state.arrangements);
     const resolved = db.execute(migrated.revision, {
@@ -499,11 +548,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=7");
+  db.exec("PRAGMA user_version=8");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 7);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 8);
   inspect.close();
 });
 

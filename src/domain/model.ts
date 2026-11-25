@@ -171,16 +171,28 @@ const changeSchema = z.object({
   descendantIds: z.array(z.string()).optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
-const adjustmentCardSchema = z.object({
-  id: z.string(),
-  taskId: z.string(),
-  title: z.string(),
-  reason: z.string(),
-  status: changeStatus,
-  invalidated: z.boolean().optional(),
-  previousExpectedDate: z.string().optional(),
-  changes: z.array(changeSchema).nonempty(),
-});
+const adjustmentCardSchema = z
+  .object({
+    id: z.string(),
+    taskId: z.string(),
+    title: z.string(),
+    reason: z.string(),
+    status: changeStatus.or(z.literal("failed")),
+    failureReason: z.string().optional(),
+    // 兼容 v6 已保存的旧版单次推进方案。
+    invalidated: z.boolean().optional(),
+    previousExpectedDate: z.string().optional(),
+    changes: z.array(changeSchema).nonempty(),
+  })
+  .transform(({ invalidated, ...card }) =>
+    invalidated
+      ? {
+          ...card,
+          status: "failed" as const,
+          failureReason: "该方案使用了已移除的单次推进功能。",
+        }
+      : card,
+  );
 export type AdjustmentCard = z.infer<typeof adjustmentCardSchema>;
 const proposalHeader = z.object({
   id: z.string(),
@@ -332,6 +344,12 @@ export const commandSchema = z.discriminatedUnion("type", [
     targetTaskIds: z.array(z.string()).nonempty(),
   }),
   z.object({ type: z.literal("proposal"), proposal: proposalSchema }),
+  z.object({
+    type: z.literal("respondToCard"),
+    proposalId: z.string(),
+    cardId: z.string(),
+    accept: z.boolean(),
+  }),
   z.object({
     type: z.literal("resolve"),
     proposalId: z.string(),
