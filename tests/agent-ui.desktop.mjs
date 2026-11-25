@@ -132,7 +132,12 @@ try {
         parentId: null,
         updatedAt: now,
       },
-      arrangement: { date: "2026-11-20", scope: "核对发票" },
+    });
+    state = await window.desktop.execute(state.revision, {
+      type: "schedule",
+      taskId,
+      date: "2026-11-20",
+      scope: "核对发票",
     });
     const proposalId = crypto.randomUUID();
     const change = {

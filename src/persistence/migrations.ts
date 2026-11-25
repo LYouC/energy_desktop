@@ -26,6 +26,24 @@ export function migrateWorkspaceProposals(payload: string): State {
   });
 }
 
+export function migrateWorkspaceV5(payload: string): State {
+  const state = stateSchema.parse(JSON.parse(payload));
+  // v5 的 todayOnly 只由 advanceTask 产生；新版整项 schedule 在 v6 起复用该标记。
+  for (const proposal of state.proposals)
+    for (const card of proposal.cards)
+      if (
+        card.status === "pending" &&
+        card.changes.some(
+          (change) => change.type === "schedule" && change.todayOnly,
+        )
+      ) {
+        card.status = "rejected";
+        card.invalidated = true;
+      }
+  state.revision++;
+  return state;
+}
+
 /** v1 的分散文本合入说明；推进日期不是开始日期，不能据此推断。 */
 export function migrateWorkspaceV1(payload: string): State {
   const previous = JSON.parse(payload);

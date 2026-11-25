@@ -836,7 +836,7 @@ async function energy(event: Event) {
           >
             <Sun :size="28" />
             <h2>给今天一个开始</h2>
-            <p>记下一件事，设定本次推进范围。也可以在右侧试着生成安排。</p>
+            <p>记下一件事，再把它安排到今天。也可以在右侧试着生成安排。</p>
             <Button variant="outline" @click="addTask"
               ><Plus :size="16" />记下一件事</Button
             >

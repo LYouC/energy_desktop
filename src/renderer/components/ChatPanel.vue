@@ -556,11 +556,13 @@ onBeforeUnmount(() => {
                 </p>
                 <p class="muted">{{ card.reason }}</p>
                 <span class="change-status">{{
-                  {
-                    pending: "待接受",
-                    accepted: "已接受 · 已生效",
-                    rejected: "已拒绝",
-                  }[card.status]
+                  card.invalidated
+                    ? "已失效"
+                    : {
+                        pending: "待接受",
+                        accepted: "已接受 · 已生效",
+                        rejected: "已拒绝",
+                      }[card.status]
                 }}</span>
                 <div v-if="card.status === 'pending'" class="row">
                   <Button

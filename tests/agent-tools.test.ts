@@ -115,15 +115,25 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
     title: "汇总远期记录",
     expectedDate: "2027-01-06",
   };
-  const initial = db.execute(db.load().revision, {
+  let initial = db.execute(db.load().revision, {
     type: "saveTask",
     task: near,
-    arrangement: { date: "2027-01-02", scope: "核对所有表单" },
   });
-  const before = db.execute(initial.revision, {
+  initial = db.execute(initial.revision, {
+    type: "schedule",
+    taskId: near.id,
+    date: "2027-01-02",
+    scope: "核对所有表单",
+  });
+  let before = db.execute(initial.revision, {
     type: "saveTask",
     task: far,
-    arrangement: { date: "2027-01-06", scope: "汇总全部远期记录" },
+  });
+  before = db.execute(before.revision, {
+    type: "schedule",
+    taskId: far.id,
+    date: "2027-01-06",
+    scope: "汇总全部远期记录",
   });
   const advance = {
     name: "prepareTurn",
@@ -131,9 +141,10 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
       intent: "changes",
       actions: [
         {
-          type: "advanceTask",
+          type: "schedule",
           mode: "proposal",
           taskId: near.id,
+          date,
           scope: "核对所有表单",
           reason: "今天还有足够时间。",
         },
@@ -166,7 +177,7 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
         case 3:
           assert.match(
             results,
-            /提前推进须从本轮 readUpcomingTasks 返回的候选选择/,
+            /提前推进建议须从本轮 readUpcomingTasks 返回的候选选择/,
           );
           return response([{ name: "readUpcomingTasks", input: {} }]);
         case 4:
@@ -175,7 +186,6 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
           assert.doesNotMatch(results, /汇总远期记录/);
           return response([{ name: "readUpcomingTasks", input: { days: 3 } }]);
         case 5:
-          // The narrower follow-up does not discard the candidate already read in this turn.
           assert.equal(results.match(/"through":"2027-01-01"/g)?.length, 2);
           return response([advance]);
         default:
@@ -257,6 +267,74 @@ test("SDK 强制一周上限和较短窗口，接受前只读候选及保存建�
     { taskId: near.id, date, scope: "核对所有表单", done: false },
   ]);
   assert.equal(accepted.tasks[0].expectedDate, near.expectedDate);
+});
+
+test("今日已有安排时，Agent 不能用共享建议绕过当天入队校验", async () => {
+  const date = "2026-12-29";
+  const task = { ...newTask(), title: "核对表单" };
+  let state = applyCommand(emptyState(), { type: "saveTask", task }, date);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: task.id, date, scope: task.title },
+    date,
+  );
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      calls++;
+      if (calls === 1)
+        return response([
+          {
+            name: "prepareTurn",
+            input: {
+              intent: "changes",
+              actions: [
+                {
+                  type: "schedule",
+                  mode: "proposal",
+                  taskId: task.id,
+                  date,
+                  scope: "再次核对表单",
+                  reason: "今天还有时间。",
+                },
+              ],
+            },
+          },
+        ]);
+      if (calls === 2) {
+        const receipts = JSON.stringify(
+          options.prompt.filter(({ role }) => role === "tool"),
+        );
+        assert.match(receipts, /任务当前不能新增今日安排/);
+        return response([
+          {
+            name: "prepareTurn",
+            input: { intent: "conversation", actions: [] },
+          },
+        ]);
+      }
+      return response([], "这项任务今天已有安排，保持原范围。");
+    },
+  });
+  const result = await generateAgentTurn({
+    state,
+    sessionId: state.activeSessionId,
+    focusedId: null,
+    userText: "再提一个今天的建议",
+    connection,
+    model,
+    date,
+    signal: AbortSignal.timeout(10000),
+    emit: () => {},
+  });
+  assert.match(
+    result.trace.validationErrors?.join(" ") ?? "",
+    /任务当前不能新增今日安排/,
+  );
+  assert.deepEqual(result.turn.actions, []);
+  assert.deepEqual(state.arrangements, [
+    { taskId: task.id, date, scope: task.title, done: false },
+  ]);
 });
 
 test("SDK 可由模板补加当天实例，终答收到单次范围和完成结果", async () => {

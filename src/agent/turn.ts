@@ -88,21 +88,11 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     fromDate: z.iso
       .date()
       .optional()
-      .describe("仅移动已有安排时填写原日期。新增一次推进并保留原安排时省略。"),
+      .describe(
+        "仅移动已有安排时填写原日期。新增整项任务安排并保留原安排时省略。",
+      ),
   }),
-  z.strictObject({
-    type: z
-      .literal("advanceTask")
-      .describe("从近期查询结果提议新增一次今日推进，保留原安排和预计日期。"),
-    taskId: existingTask.taskId,
-    mode: z.literal("proposal"),
-    scope: z.string().trim().min(1).describe("今天独立可完成的推进范围。"),
-    reason: z
-      .string()
-      .trim()
-      .min(1)
-      .describe("说明为何适合今天推进、估时和已知前提。"),
-  }),
+
   z.object({
     type: z.literal("unschedule"),
     ...existingTask,
@@ -118,12 +108,6 @@ export const agentActionSchema = z.discriminatedUnion("type", [
     date: z.iso.date(),
     scope: z.string().min(1),
     targetTaskId: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal("stage"),
-    ...existingTask,
-    date: z.iso.date(),
-    done: z.boolean(),
   }),
   z.object({
     type: z.literal("split"),
@@ -383,10 +367,8 @@ export function applyAgentTurn(
     if (
       (recurrences.get(sourceId) || (task && recurrences.get(task.id))) &&
       (action.type === "schedule" ||
-        action.type === "advanceTask" ||
         action.type === "unschedule" ||
-        action.type === "updateArrangement" ||
-        action.type === "stage")
+        action.type === "updateArrangement")
     )
       throw new Error("请选择对应的重复任务操作，今日实例使用单次操作。");
     if (recurrences.get(sourceId) && action.type === "updateTask")
@@ -435,7 +417,7 @@ export function applyAgentTurn(
         throw new Error("删除模板也会删除其子任务，请核实删除范围。");
     }
     if (
-      (action.type === "stage" || action.type === "setOccurrenceDone") &&
+      action.type === "setOccurrenceDone" &&
       action.done &&
       action.date === date
     )
@@ -453,7 +435,7 @@ export function applyAgentTurn(
       type:
         action.type === "updateTask"
           ? "update"
-          : action.type === "updateArrangement" || action.type === "advanceTask"
+          : action.type === "updateArrangement"
             ? "schedule"
             : action.type,
       date:
@@ -461,7 +443,6 @@ export function applyAgentTurn(
           ? action.date
           : action.type === "updateRecurrence" ||
               action.type === "deleteRecurringTask" ||
-              action.type === "advanceTask" ||
               (action.type === "split" &&
                 action.children.some((child) => child.todayScope))
             ? date
@@ -474,7 +455,9 @@ export function applyAgentTurn(
       ...(action.type === "schedule" && action.fromDate
         ? { fromDate: action.fromDate }
         : {}),
-      ...(action.type === "advanceTask" ? { todayOnly: true } : {}),
+      ...(action.type === "schedule" && !action.fromDate && action.date === date
+        ? { todayOnly: true as const }
+        : {}),
       ...("done" in action ? { done: action.done } : {}),
       ...(action.type === "updateRecurrence"
         ? { recurrence: action.recurrence }
@@ -519,7 +502,7 @@ export function applyAgentTurn(
         proposal.cards.push(card);
       }
     } else {
-      // 直接操作也复用方案应用器，确保日期、关系、版本与阶段规则一致。
+      // 直接操作也复用方案应用器，确保日期、关系、版本与完成规则一致。
       const immediate: Proposal = {
         ...proposal,
         id: crypto.randomUUID(),

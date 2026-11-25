@@ -856,7 +856,7 @@ test("不能跨会话接受方案，接受重试只生效一次", () => {
   state = applyAgentTurn(state, proposal.sessionId, "接受这项", turn);
   assert.equal(state.tasks.length, 2);
 });
-test("新增方案操作更新任务与阶段，拒绝不改业务数据", () => {
+test("旧阶段方案继续整卡应用，拒绝不改业务数据", () => {
   let state = fixture();
   state = applyCommand(state, {
     type: "schedule",
@@ -864,28 +864,48 @@ test("新增方案操作更新任务与阶段，拒绝不改业务数据", () =>
     date: "2026-11-16",
     scope: "读一页",
   });
-  state = applyAgentTurn(state, state.activeSessionId, "重新分析", {
-    text: "建议暂停",
-    actions: [
-      {
-        type: "updateTask",
-        taskId: state.tasks[0].id,
-        patch: { status: "waiting" },
-        mode: "proposal",
-        quote: "重新分析",
-      },
-      {
-        type: "stage",
-        taskId: state.tasks[0].id,
-        date: "2026-11-16",
-        done: true,
-        mode: "proposal",
-        quote: "重新分析",
-      },
-    ],
+  state = applyCommand(state, {
+    type: "proposal",
+    proposal: {
+      id: "legacy-stage",
+      sessionId: state.activeSessionId,
+      createdAt: new Date().toISOString(),
+      cards: [
+        {
+          id: "legacy-stage-card",
+          taskId: state.tasks[0].id,
+          title: state.tasks[0].title,
+          reason: "保留旧方案",
+          status: "pending",
+          changes: [
+            {
+              id: "legacy-update",
+              taskId: state.tasks[0].id,
+              taskVersion: state.tasks[0].version,
+              label: "暂停任务",
+              type: "update",
+              date: "",
+              scope: "",
+              children: [],
+              patch: { status: "waiting" },
+            },
+            {
+              id: "legacy-stage-change",
+              taskId: state.tasks[0].id,
+              taskVersion: state.tasks[0].version,
+              label: "完成旧阶段",
+              type: "stage",
+              date: "2026-11-16",
+              scope: "读一页",
+              children: [],
+              done: true,
+            },
+          ],
+        },
+      ],
+    },
   });
   const [p] = state.proposals;
-  assert.equal(p.cards.length, 1);
   const command = {
     type: "resolve" as const,
     proposalId: p.id,
@@ -907,10 +927,15 @@ function invoiceAdjustmentFixture(db: WorkspaceDatabase, today: string) {
     startDate: today,
     expectedDate: today,
   };
-  const state = db.execute(db.load().revision, {
+  let state = db.execute(db.load().revision, {
     type: "saveTask",
     task: invoice,
-    arrangement: { date: today, scope: "核对发票" },
+  });
+  state = db.execute(state.revision, {
+    type: "schedule",
+    taskId: invoice.id,
+    date: today,
+    scope: "核对发票",
   });
   const move = {
     type: "schedule",
@@ -1041,10 +1066,15 @@ test("一张卡只保留连续移期的最终安排，并按完整日期组合�
     startDate: "2026-11-25",
     expectedDate: "2026-11-26",
   };
-  const initial = applyCommand(emptyState(), {
+  let initial = applyCommand(emptyState(), {
     type: "saveTask",
     task,
-    arrangement: { date: "2026-11-20", scope: "先核对发票" },
+  });
+  initial = applyCommand(initial, {
+    type: "schedule",
+    taskId: task.id,
+    date: "2026-11-20",
+    scope: "先核对发票",
   });
   const options = { taskId: task.id, mode: "proposal" };
   const planned = applyAgentTurn(
@@ -1101,10 +1131,15 @@ test("一张卡只保留连续移期的最终安排，并按完整日期组合�
 
 test("连续移期会移除本卡先前在中间日期新增的安排", () => {
   const task = { ...newTask(), title: "整理发票" };
-  const initial = applyCommand(emptyState(), {
+  let initial = applyCommand(emptyState(), {
     type: "saveTask",
     task,
-    arrangement: { date: "2026-11-20", scope: "核对发票" },
+  });
+  initial = applyCommand(initial, {
+    type: "schedule",
+    taskId: task.id,
+    date: "2026-11-20",
+    scope: "核对发票",
   });
   const base = {
     type: "schedule",
@@ -1177,14 +1212,16 @@ test("数据库Agent整轮事务失败保持原状态并检查版本", () => {
   );
   db.close();
 });
-test("动作协议排除能量及任意命令", () => {
-  assert.equal(
-    agentTurnSchema.safeParse({
-      text: "已改",
-      actions: [{ type: "energy", value: "需要恢复" }],
-    }).success,
-    false,
-  );
+test("动作协议排除能量、单次阶段推进及任意命令", () => {
+  for (const action of [
+    { type: "energy", value: "需要恢复" },
+    { type: "stage", taskId: "task", date: "2026-11-20", done: true },
+    { type: "advanceTask", taskId: "task", scope: "阶段" },
+  ])
+    assert.equal(
+      agentTurnSchema.safeParse({ text: "已改", actions: [action] }).success,
+      false,
+    );
 });
 
 test("自然确认可采用模型整理的标题与说明", () => {

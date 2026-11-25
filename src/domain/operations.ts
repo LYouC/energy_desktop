@@ -256,10 +256,16 @@ function activeOccurrence(
   taskId: string,
   date: string,
   today: string,
+  includeTemporary = false,
 ) {
   if (date !== today) throw new Error("只能调整当天的重复任务。");
+  const temporary =
+    includeTemporary && effectiveRecurrences(state.tasks).has(taskId);
   const index = state.arrangements.findIndex(
-    (item) => item.taskId === taskId && item.date === date && item.recurrence,
+    (item) =>
+      item.taskId === taskId &&
+      item.date === date &&
+      (item.recurrence || temporary),
   );
   if (index < 0) throw new Error("这次重复任务已变化，请刷新后重试。");
   return index;
@@ -340,7 +346,6 @@ function saveTask(
   input: Extract<Command, { type: "saveTask" }>["task"],
   date: string,
   now: string,
-  arrangement?: Extract<Command, { type: "saveTask" }>["arrangement"],
 ) {
   const old = state.tasks.find((task) => task.id === input.id);
   if (!old && input.version !== 0)
@@ -369,8 +374,7 @@ function saveTask(
   if (old) state.tasks[state.tasks.indexOf(old)] = task;
   else state.tasks.push(task);
   checkRelations(state.tasks);
-  if (arrangement)
-    schedule(state, task.id, arrangement.date, arrangement.scope);
+
   if (previousRecurrences) {
     const recurrences = effectiveRecurrences(state.tasks);
     const cursors = new Map(
@@ -421,7 +425,7 @@ function updateOccurrenceScope(
   scope: string,
   today: string,
 ) {
-  const index = activeOccurrence(state, taskId, date, today);
+  const index = activeOccurrence(state, taskId, date, today, true);
   const arrangement = state.arrangements[index];
   arrangement.scope = scope;
   advanceArrangementVersion(state, arrangement);
@@ -606,7 +610,7 @@ export function applyCommand(
   synchronizeRecurrence(state, date);
   switch (command.type) {
     case "saveTask": {
-      saveTask(state, command.task, date, now, command.arrangement);
+      saveTask(state, command.task, date, now);
       break;
     }
     case "deleteTask":

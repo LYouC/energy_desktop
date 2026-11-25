@@ -11,7 +11,7 @@
 
 本模块复用[领域模型与命令](../domain/README.md)。运行层接收工作区读写接口，由[桌面宿主](../desktop/README.md)接入 SQLite 和 IPC。配置从宿主接收凭据加密能力。
 
-`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、整卡确认与明确缩小授权范围、阶段收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。
+`prompt.ts` 按身份、任务、指导思想、每轮执行、要求和示例组织，将《反倦怠能量站》的能量感思路用于规划、启动、受阻与收尾。示例覆盖闲聊转建任务、整卡确认与明确缩小授权范围、子任务收尾、容量冲突，以及不同阻力下的能量分析。结构依据见 [Agent 提示词调研](../../docs/Agent提示词调研.md)。
 
 ## 调用与数据流
 
@@ -43,9 +43,9 @@ SiliconFlow 使用已验证的 `enable_thinking:false` 工具调用配置。服�
 | `calculateCapacity` | 计算可用时间、任务估时和缓冲的容量关系                 |
 | `prepareTurn`       | 提交 intent、actions 及可选 memory，预演后返回业务回执 |
 
-`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性与说明，`split` 拆分子任务，`schedule` 新增普通安排或移期，`updateArrangement` 修改普通安排，`unschedule` 取消普通安排，`stage` 完成或恢复普通阶段，`resolve` 接受或拒绝整张任务调整卡。
+`prepareTurn.actions` 用 `createTask` 创建任务，`updateTask` 修改属性、说明与普通任务整体状态，`split` 拆分子任务，`schedule` 新增整项普通安排或移期，`updateArrangement` 修改普通安排范围，`unschedule` 取消普通安排，`resolve` 接受或拒绝整张任务调整卡。部分工作通过独立任务、`split.children[].todayScope` 或已有安排范围表达；模型协议不再提供普通 `stage` 或专用 `advanceTask` 动作。
 
-`readUpcomingTasks({days})` 从本轮工作区日期的次日开始，默认查七天，返回 `from/through/tasks`。查询复用今日入队资格，并排除预计今天完成的任务。按预计起止日期或窗口内未完成的普通安排命中，返回任务属性和窗口内待推进安排的日期与范围。模型用 `advanceTask` 从本轮成功查询过的候选中提议提前，必须提供范围与理由，日期使用本轮工作区日期。该动作生成现有的安排调整卡，接受时核对日期及入队资格。明确指名的任务和改期仍按已有详情或安排流程处理。
+`readUpcomingTasks({days})` 从本轮工作区日期的次日开始，默认查七天，返回 `from/through/tasks`。查询复用今日入队资格，并排除预计今天完成的任务。按预计起止日期或窗口内未完成的普通安排命中，返回任务属性和窗口内待推进安排的日期与范围。整项提前完成用 `schedule` 提议今天的共享安排，部分工作用独立任务、拆分或 `updateArrangement` 表达。新增当天安排的调整卡接受时核对日期及入队资格，原安排与预计日期默认保留。明确指名的任务和改期仍按已有详情或安排流程处理。
 
 重复任务在 `createTask` 动作顶层填写 `recurrence`。已有任务用 `updateRecurrence` 设置或修改规则，用 `deleteRecurringTask` 删除重复任务。已有预计开始日与首次重复日期冲突时需核实。编辑已有规则从次日生效，拆分重复父任务生成的子任务跟随父规则。删除同时删除后代任务并保留已生成的本地实例。存在子任务时需明确指定 `includeChildren`。
 

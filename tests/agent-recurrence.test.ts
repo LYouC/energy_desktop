@@ -207,13 +207,10 @@ test("Agent 可创建每天、每周和含首尾的日期范围任务，同轮�
 
 test("现有普通任务首次设重复复用同日安排，改规则时今日实例保持不变", () => {
   const task = { ...newTask(), title: "练琴" };
-  const state = applyCommand(
-    emptyState(),
-    {
-      type: "saveTask",
-      task,
-      arrangement: { date: today, scope: "练第一段" },
-    },
+  let state = applyCommand(emptyState(), { type: "saveTask", task }, today);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: task.id, date: today, scope: "练第一段" },
     today,
   );
   const taskId = task.id;

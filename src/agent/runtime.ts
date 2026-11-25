@@ -18,7 +18,7 @@ import {
   upcomingTasks,
 } from "./context";
 import { localDate, type Command, type State } from "../domain/model";
-import { applyCommand } from "../domain/operations";
+import { applyCommand, schedulableTodayTasks } from "../domain/operations";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "./capacity";
 
@@ -159,11 +159,14 @@ export async function generateAgentTurn(options: {
   };
   // 保留真实的user/assistant轮次，让短答自然承接上一轮，而不是把整段对话塞成一条JSON消息。
   const { recentMessages, ...workspaceContext } = context;
+  const todayTaskIds = new Set([
+    ...context.today.map(({ taskId }) => taskId),
+    ...context.dueToday.map(({ id }) => id),
+  ]);
+  const schedulableTodayIds = new Set(
+    schedulableTodayTasks(state, context.date).map(({ id }) => id),
+  );
   if (options.suggestOnly) {
-    const todayTaskIds = new Set([
-      ...context.today.map(({ taskId }) => taskId),
-      ...context.dueToday.map(({ id }) => id),
-    ]);
     // 一键优化先核算今天，未来安排由模型按需查询。
     workspaceContext.unfinishedTasks = context.unfinishedTasks.filter(
       ({ id }) => todayTaskIds.has(id),
@@ -197,12 +200,31 @@ export async function generateAgentTurn(options: {
         if (
           actions.some(
             (action) =>
-              action.type === "advanceTask" &&
+              action.type === "schedule" &&
+              action.mode === "proposal" &&
+              !action.fromDate &&
+              action.date === context.date &&
+              !schedulableTodayIds.has(action.taskId) &&
+              state.tasks.some((task) => task.id === action.taskId),
+          )
+        )
+          throw new Error(
+            "任务当前不能新增今日安排，请重新核对状态或改用已有安排操作。",
+          );
+        if (
+          actions.some(
+            (action) =>
+              action.type === "schedule" &&
+              action.mode === "proposal" &&
+              !action.fromDate &&
+              action.date === context.date &&
+              !todayTaskIds.has(action.taskId) &&
+              schedulableTodayIds.has(action.taskId) &&
               !upcomingTaskIds.has(action.taskId),
           )
         )
           throw new Error(
-            "提前推进须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
+            "提前推进建议须从本轮 readUpcomingTasks 返回的候选选择，请先查询或修正任务。",
           );
         const next = applyAgentTurn(
           state,

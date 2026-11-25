@@ -315,6 +315,82 @@ test("v4 旧方案保留历史状态和同任务待定项的独立确认范围",
   }
 });
 
+test("v5 旧提前推进方案失效，历史阶段与临时安排保留", () => {
+  const today = "2026-11-16";
+  let state = taskState();
+  state = applyCommand(
+    state,
+    {
+      type: "saveTask",
+      task: {
+        ...newTask(),
+        title: "每周整理",
+        recurrence: {
+          type: "range",
+          start: "2026-11-17",
+          end: "2026-11-18",
+        },
+      },
+    },
+    today,
+  );
+  state = applyCommand(state, {
+    type: "schedule",
+    taskId: state.tasks[0].id,
+    date: "2026-11-15",
+    scope: "已经完成的旧阶段",
+  });
+  state = applyCommand(state, {
+    type: "stage",
+    taskId: state.tasks[0].id,
+    date: "2026-11-15",
+    done: true,
+  });
+  state = applyCommand(state, {
+    type: "schedule",
+    taskId: state.tasks[1].id,
+    date: today,
+    scope: "保留下来的临时范围",
+  });
+  const proposal = proposalFor(state);
+  proposal.cards[0].changes[0] = {
+    ...proposal.cards[0].changes[0],
+    date: today,
+    todayOnly: true,
+  };
+  state = applyCommand(state, { type: "proposal", proposal });
+  const filename = path.join(
+    mkdtempSync(path.join(tmpdir(), "xixu-proposal-v5-")),
+    "workspace.db",
+  );
+  const raw = new DatabaseSync(filename);
+  raw.exec(
+    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=5;",
+  );
+  raw
+    .prepare("INSERT INTO workspace VALUES (1, ?, ?)")
+    .run(state.revision, JSON.stringify(state));
+  raw.close();
+
+  const db = new WorkspaceDatabase(filename, () => today);
+  try {
+    const migrated = db.load();
+    assert.equal(migrated.proposals[0].cards[0].status, "rejected");
+    assert.equal(migrated.proposals[0].cards[0].invalidated, true);
+    assert.equal(migrated.proposals[0].cards[0].reason, "测试");
+    assert.deepEqual(migrated.arrangements, state.arrangements);
+    const resolved = db.execute(migrated.revision, {
+      type: "resolve",
+      proposalId: proposal.id,
+      cardIds: [proposal.cards[0].id],
+      accept: true,
+    });
+    assert.deepEqual(resolved, migrated);
+  } finally {
+    db.close();
+  }
+});
+
 test("回复与方案原子保存，失败不会留下孤立回复", () => {
   const state = taskState();
   const proposal = proposalFor(state);
@@ -401,8 +477,7 @@ test("磁盘重开、多个连接版本冲突与失败事务回滚", () => {
     assert.throws(() =>
       b.execute(saved.revision, {
         type: "saveTask",
-        task: { ...newTask(), title: "应回滚" },
-        arrangement: { date: "bad", scope: "阶段" },
+        task: { ...newTask(), title: "应回滚", expectedDate: "bad" },
       }),
     );
     assert.deepEqual(b.load(), saved);
@@ -424,11 +499,11 @@ test("拒绝未来数据库版本，保留原数据", () => {
     "workspace.db",
   );
   const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=6");
+  db.exec("PRAGMA user_version=7");
   db.close();
   assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
   const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 6);
+  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 7);
   inspect.close();
 });
 

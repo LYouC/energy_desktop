@@ -54,7 +54,7 @@
         <summary>查看编排、校验与模块职责</summary>
         <div class="technical">
           <p><code>runtime.ts</code> 使用真实对话轮次，每轮最多六个模型步骤，超时一百二十秒。<code>readTask</code> 查询指定任务，<code>readConversation</code> 查阅当前会话历史，<code>calculateCapacity</code> 核算时间。需要寻找可提前推进的任务时，<code>readUpcomingTasks</code> 只读查询从明天起一至七天的候选。模型用 <code>prepareTurn</code> 提交本轮决定、具体动作与可选记忆。程序预演动作，对每张新卡试应用并返回回执，模型随后生成自然语言终答。本轮完整结果通过一次事务保存。</p>
-          <p><code>src/agent/turn.ts</code> 把模型选定的动作转换成有限业务操作。任务属性和字段归属见 <a href="产品需求.md">产品需求</a>。创建时机、授权和指代由模型理解，程序检查结构、任务关系、会话归属和版本。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。<code>advanceTask</code> 从本轮查到的候选生成待接受的提前推进建议。接受时重新核对日期和入队资格，新增当天安排并保留原日程。</p>
+          <p><code>src/agent/turn.ts</code> 把模型选定的动作转换成有限业务操作。任务属性和字段归属见 <a href="产品需求.md">产品需求</a>。创建时机、授权和指代由模型理解，程序检查结构、任务关系、会话归属和版本。修改范围用 <code>updateArrangement</code> 明确指定原安排，支持原子转由子任务承接。整项提前完成通过 <code>schedule</code> 生成待接受建议；部分工作通过独立任务、子任务拆分或范围调整表达。接受当天新增安排时重新核对日期和入队资格，并保留原日程。</p>
           <p>对话通过 <code>resolve</code> 引用当前会话的 <code>proposalId</code> 和 <code>cardIds</code>，界面的确认按钮提交单张卡。<code>operations.ts</code> 按整卡校验和应用变更。<code>runtime.ts</code> 比较运行前后任务、安排、方案、能量、偏好和会话记忆的快照。<code>storage.ts</code> 在事务内检查数据版本，一次保存本轮操作、记忆与最终回复。</p>
           <p><code>config.ts</code> 管理 HTTPS 服务地址、模型与凭据。设置界面输入的 Key 使用 Electron <code>safeStorage</code> 加密保存，也可从执行进程的环境变量读取。界面查询配置只取得服务地址、模型及是否已配置 Key。更换服务地址时需提供相应凭据。</p>
           <p>同一套 Agent 循环承担澄清、拆分、安排与受阻协助。模型先决定操作并读取回执，随后生成的自然语言正文支持流式预览。工具步骤中的文字属于中间过程，正式业务变更与会话记录以事务保存成功为准。</p>

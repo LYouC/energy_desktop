@@ -114,10 +114,16 @@ test("新建每日模板时，今天实例排在已有安排后并独立完成",
   };
   let state = applyCommand(
     emptyState(),
+    { type: "saveTask", task: ordinary },
+    monday,
+  );
+  state = applyCommand(
+    state,
     {
-      type: "saveTask",
-      task: ordinary,
-      arrangement: { date: monday, scope: "明确待办" },
+      type: "schedule",
+      taskId: ordinary.id,
+      date: monday,
+      scope: "明确待办",
     },
     monday,
   );
@@ -143,13 +149,10 @@ test("新建每日模板时，今天实例排在已有安排后并独立完成",
 test("每周后续未打开仍按星期补齐；已有安排原地保留完成情况和范围", () => {
   const task = { ...newTask(), title: "练英语" };
   const other = { ...newTask(), title: "整理会议纪要" };
-  let state = applyCommand(
-    emptyState(),
-    {
-      type: "saveTask",
-      task,
-      arrangement: { date: monday, scope: "五分钟跟读" },
-    },
+  let state = applyCommand(emptyState(), { type: "saveTask", task }, monday);
+  state = applyCommand(
+    state,
+    { type: "schedule", taskId: task.id, date: monday, scope: "五分钟跟读" },
     monday,
   );
   state = applyCommand(
@@ -157,12 +160,14 @@ test("每周后续未打开仍按星期补齐；已有安排原地保留完成�
     { type: "stage", taskId: task.id, date: monday, done: true },
     monday,
   );
+  state = applyCommand(state, { type: "saveTask", task: other }, monday);
   state = applyCommand(
     state,
     {
-      type: "saveTask",
-      task: other,
-      arrangement: { date: monday, scope: "记录会议行动" },
+      type: "schedule",
+      taskId: other.id,
+      date: monday,
+      scope: "记录会议行动",
     },
     monday,
   );
@@ -353,20 +358,28 @@ test("撤销移除时，前一个事项已移除仍能回到后一个事项之�
   const last = { ...newTask(), title: "整理材料" };
   let state = applyCommand(
     emptyState(),
+    { type: "saveTask", task: first },
+    monday,
+  );
+  state = applyCommand(
+    state,
     {
-      type: "saveTask",
-      task: first,
-      arrangement: { date: monday, scope: first.title },
+      type: "schedule",
+      taskId: first.id,
+      date: monday,
+      scope: first.title,
     },
     monday,
   );
   state = applyCommand(state, { type: "saveTask", task: repeat }, monday);
+  state = applyCommand(state, { type: "saveTask", task: last }, monday);
   state = applyCommand(
     state,
     {
-      type: "saveTask",
-      task: last,
-      arrangement: { date: monday, scope: last.title },
+      type: "schedule",
+      taskId: last.id,
+      date: monday,
+      scope: last.title,
     },
     monday,
   );
@@ -406,13 +419,10 @@ test("删除父任务停止重复子任务，历史和今天已生成的实例�
     monday,
   );
   state = applyCommand(state, { type: "saveTask", task: child }, monday);
+  state = applyCommand(state, { type: "saveTask", task: other }, today);
   state = applyCommand(
     state,
-    {
-      type: "saveTask",
-      task: other,
-      arrangement: { date: today, scope: "核对待办" },
-    },
+    { type: "schedule", taskId: other.id, date: today, scope: "核对待办" },
     today,
   );
   const stale = state.tasks.find((task) => task.id === child.id)!;

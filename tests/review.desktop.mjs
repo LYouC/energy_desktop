@@ -81,16 +81,15 @@ try {
   for (const theme of ["light", "dark"]) {
     await settings(theme);
     await page.screenshot({ path: `test-results/review-${theme}-today.png` });
+    await expect(page.locator(".stage-goal")).toContainText("今天整理资料");
     await page.getByRole("button", { name: "查看任务详情" }).click();
     await page.screenshot({ path: `test-results/review-${theme}-task.png` });
-    const today = await page.evaluate(() => {
-      const date = new Date();
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    });
-    await page.getByText("安排一次推进", { exact: true }).click();
-    await page.getByLabel("推进日期").fill(today);
-    await expect(page.getByLabel("本次阶段目标")).toHaveValue("今天整理资料");
-    checks.push(`${theme}切换已有安排日期后正确显示当日范围`);
+    await expect(page.getByText("安排一次推进", { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.getByLabel("推进日期")).toHaveCount(0);
+    await expect(page.getByLabel("本次阶段目标")).toHaveCount(0);
+    checks.push(`${theme}任务编辑器不显示单次阶段推进入口，原范围仍可读`);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /所有任务/ }).click();
     await page.screenshot({ path: `test-results/review-${theme}-list.png` });

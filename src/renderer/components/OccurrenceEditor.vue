@@ -36,12 +36,12 @@ async function save() {
   <Modal
     :open="true"
     title="本次详情"
-    :description="`${occurrence.recurrence?.title ?? ''} · ${occurrence.date}`"
+    :description="`${occurrence.recurrence?.title ?? task?.title ?? ''} · ${occurrence.date}`"
     @update:open="!$event && emit('close')"
   >
     <form class="task-form" @submit.prevent="save">
       <label>
-        本次阶段目标
+        本次范围
         <textarea v-model="scope" rows="3" required />
       </label>
       <p v-if="error" role="alert" class="error">{{ error }}</p>

@@ -277,7 +277,7 @@ test("A21 整体完成覆盖各层一次性子任务，保留旧阶段与重复�
   assert.deepEqual(restored.arrangements, state.arrangements);
 });
 
-test("普通任务继承未来重复后，今天的临时安排仍可独立完成和恢复", () => {
+test("普通任务继承未来重复后，今天的临时安排可改范围并独立完成和恢复", () => {
   const date = "2026-11-23";
   const parent = { ...newTask(), title: "练习" };
   const child = { ...newTask(parent.id), title: "朗读" };
@@ -322,6 +322,22 @@ test("普通任务继承未来重复后，今天的临时安排仍可独立完�
     true,
   );
   assert.equal(restored.tasks[1].status, "done");
+  const updated = applyCommand(
+    restored,
+    {
+      type: "updateOccurrenceScope",
+      taskId: child.id,
+      date,
+      scope: "朗读两遍",
+    },
+    date,
+  );
+  assert.equal(updated.arrangements[0].scope, "朗读两遍");
+  assert.equal(updated.arrangements[0].recurrence, undefined);
+  assert.deepEqual(updated.tasks[0].recurrence, {
+    type: "weekly",
+    weekdays: [2],
+  });
 });
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {

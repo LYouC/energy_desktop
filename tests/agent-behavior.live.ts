@@ -210,7 +210,12 @@ for (const title of ["英语面试练习", "项目报告"]) {
   ambiguous = applyCommand(ambiguous, {
     type: "saveTask",
     task: { ...newTask(), title },
-    arrangement: { date: localDate(), scope: "推进一小段" },
+  });
+  ambiguous = applyCommand(ambiguous, {
+    type: "schedule",
+    taskId: ambiguous.tasks.at(-1)!.id,
+    date: localDate(),
+    scope: "推进一小段",
   });
 }
 ambiguous = message(
@@ -489,10 +494,15 @@ const nextDay = new Date(`${today}T12:00:00`);
 nextDay.setDate(nextDay.getDate() + 1);
 const tomorrow = localDate(nextDay);
 const invoice = { ...newTask(), title: "整理发票", expectedDate: today };
-const invoiceState = applyCommand(emptyState(), {
+let invoiceState = applyCommand(emptyState(), {
   type: "saveTask",
   task: invoice,
-  arrangement: { date: today, scope: "核对发票" },
+});
+invoiceState = applyCommand(invoiceState, {
+  type: "schedule",
+  taskId: invoice.id,
+  date: today,
+  scope: "核对发票",
 });
 const invoiceProposal = await run(
   "B11a 改期和预计完成日期组成一张调整卡",
@@ -571,14 +581,24 @@ const todayTask = { ...newTask(), title: "提交费用报表", expectedDate: tod
 let upcomingState = applyCommand(emptyState(), {
   type: "saveTask",
   task: reviewList,
-  arrangement: { date: tomorrow, scope: "核对清单所有条目" },
+});
+upcomingState = applyCommand(upcomingState, {
+  type: "schedule",
+  taskId: reviewList.id,
+  date: tomorrow,
+  scope: "核对清单所有条目",
 });
 for (const task of [pendingMaterials, distantTask])
   upcomingState = applyCommand(upcomingState, { type: "saveTask", task });
-const withTodayTask = applyCommand(upcomingState, {
+let withTodayTask = applyCommand(upcomingState, {
   type: "saveTask",
   task: todayTask,
-  arrangement: { date: today, scope: "核对金额并提交报表" },
+});
+withTodayTask = applyCommand(withTodayTask, {
+  type: "schedule",
+  taskId: todayTask.id,
+  date: today,
+  scope: "核对金额并提交报表",
 });
 
 function checkEarlierProposal(
@@ -592,8 +612,10 @@ function checkEarlierProposal(
   assert.deepEqual(next.arrangements, before.arrangements);
   assert.equal(turn.actions.length, 1);
   const [action] = turn.actions;
-  assert(action.type === "advanceTask" && action.mode === "proposal");
+  assert(action.type === "schedule" && action.mode === "proposal");
   assert.equal(action.taskId, reviewList.id);
+  assert.equal(action.date, today);
+  assert.equal(action.fromDate, undefined);
   const cards = next.proposals.at(-1)?.cards;
   assert.equal(cards?.length, 1);
   assert.equal(cards?.[0].status, "pending");

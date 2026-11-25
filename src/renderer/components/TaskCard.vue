@@ -158,7 +158,8 @@ const showScope = computed(
     props.arrangement.scope.trim() !== title.value.trim(),
 );
 function openDetails(item: Arrangement, task?: Task) {
-  if (item.recurrence) emit("occurrence", item);
+  if (item.recurrence || store.recurrences.get(item.taskId))
+    emit("occurrence", item);
   else if (task) emit("edit", task);
 }
 function completesTask(item: Arrangement, task?: Task) {
@@ -293,7 +294,11 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
       </div>
       <button
         class="icon-button"
-        :aria-label="arrangement.recurrence ? '本次详情' : '查看任务详情'"
+        :aria-label="
+          arrangement.recurrence || store.recurrences.get(arrangement.taskId)
+            ? '本次详情'
+            : '查看任务详情'
+        "
         @click="openDetails(arrangement, task)"
       >
         <ArrowUpRight :size="17" />

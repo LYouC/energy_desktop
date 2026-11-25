@@ -96,15 +96,20 @@ try {
   await page.getByRole("button", { name: "完成", exact: true }).click();
   await parentRow.click();
   await expect(dialog.getByLabel("所属任务").locator("option")).toHaveCount(1);
-  await dialog.getByText("安排一次推进", { exact: true }).click();
-  await dialog.getByLabel("推进日期").fill("2026-11-19");
-  await dialog.getByLabel("本次阶段目标").fill("去超市购买");
-  await dialog.getByRole("button", { name: "保存并安排", exact: true }).click();
+  await expect(dialog.getByText("安排一次推进", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByLabel("推进日期")).toHaveCount(0);
+  await expect(dialog.getByLabel("本次阶段目标")).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "保存并安排", exact: true }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
   state = await page.evaluate(() => window.desktop.load());
   expect(state.tasks.find((task) => task.id === parent.id).startDate).toBe(
     "2026-11-17",
   );
-  expect(state.arrangements[0].date).toBe("2026-11-19");
+  expect(state.arrangements).toHaveLength(0);
   expect(state.messages).toHaveLength(0);
   await app.close();
   ({ app, page } = await launch());
@@ -180,11 +185,22 @@ try {
   await dialog.getByLabel("所属任务").selectOption(parent.id);
   await dialog.getByLabel("预计开始日期").fill(tomorrow);
   await dialog.getByLabel("预计完成日期").fill(tomorrow);
-  await dialog.getByText("安排一次推进", { exact: true }).click();
-  await dialog.getByLabel("推进日期").fill(tomorrow);
-  await dialog.getByLabel("本次阶段目标").fill("带齐明天要用的资料");
-  await dialog.getByRole("button", { name: "保存并安排", exact: true }).click();
+  await expect(dialog.getByText("安排一次推进", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByLabel("本次阶段目标")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await page.evaluate(async (date) => {
+    const state = await window.desktop.load();
+    const task = state.tasks.find((item) => item.title === "整理明天的材料");
+    await window.desktop.execute(state.revision, {
+      type: "schedule",
+      taskId: task.id,
+      date,
+      scope: "带齐明天要用的资料",
+    });
+  }, tomorrow);
   await page.getByRole("button", { name: /所有任务/ }).click();
   const action = page.getByRole("button", {
     name: "安排到今天：整理明天的材料",

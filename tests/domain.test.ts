@@ -6,6 +6,7 @@ import {
   localDate,
   type State,
   type Proposal,
+  type Command,
 } from "../src/domain/model";
 import { applyCommand } from "../src/domain/operations";
 import { WorkspaceDatabase } from "../src/persistence/storage";
@@ -140,18 +141,26 @@ test("SQLite 事务、版本冲突与恢复", () => {
   db.close();
 });
 
-test("保存并安排作为一次操作失败时不留半成品", () => {
-  const state = fixture();
-  assert.throws(
-    () =>
-      applyCommand(state, {
-        type: "saveTask",
-        task: { ...newTask(), title: "新任务" },
-        arrangement: { date: "invalid", scope: "阶段目标" },
-      }),
-    /日期/,
-  );
-  assert.equal(state.tasks.length, 2);
+test("旧复合保存被拒绝，任务保存不修改已有安排", () => {
+  let state = fixture();
+  state = applyCommand(state, {
+    type: "schedule",
+    taskId: state.tasks[0].id,
+    date: localDate(),
+    scope: state.tasks[0].title,
+  });
+  const legacy = {
+    type: "saveTask",
+    task: { ...newTask(), title: "新任务" },
+    arrangement: { date: localDate(), scope: "阶段目标" },
+  };
+  assert.throws(() => applyCommand(state, legacy as unknown as Command));
+  const saved = applyCommand(state, {
+    type: "saveTask",
+    task: { ...state.tasks[0], title: "已改名", expectedDate: localDate() },
+  });
+  assert.deepEqual(saved.arrangements, state.arrangements);
+  assert.equal(saved.tasks.length, 2);
 });
 
 test("重复调整卡 ID 不会重复创建子任务", () => {

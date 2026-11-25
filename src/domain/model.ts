@@ -177,6 +177,7 @@ const adjustmentCardSchema = z.object({
   title: z.string(),
   reason: z.string(),
   status: changeStatus,
+  invalidated: z.boolean().optional(),
   previousExpectedDate: z.string().optional(),
   changes: z.array(changeSchema).nonempty(),
 });
@@ -264,12 +265,9 @@ export const stateSchema = z.object({
 });
 export type State = z.infer<typeof stateSchema>;
 export const commandSchema = z.discriminatedUnion("type", [
-  z.object({
+  z.strictObject({
     type: z.literal("saveTask"),
     task: taskSchema.extend({ importance: taskImportanceSchema.optional() }),
-    arrangement: z
-      .object({ date: z.string(), scope: z.string().trim().min(1) })
-      .optional(),
   }),
   z.object({ type: z.literal("deleteTask"), id: z.string() }),
   z.object({

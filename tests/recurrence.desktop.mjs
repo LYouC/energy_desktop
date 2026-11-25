@@ -46,12 +46,15 @@ try {
     .first()
     .click();
   await editor.getByLabel("任务名称").fill("整理纪要");
-  await editor.getByText("安排一次推进", { exact: true }).click();
-  await editor.getByLabel("本次阶段目标").fill("列出三个要点");
-  await editor.getByRole("button", { name: "保存并安排" }).click();
+  await expect(editor.getByText("安排一次推进", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(editor.getByLabel("本次阶段目标")).toHaveCount(0);
+  await editor.getByRole("button", { name: "保存任务" }).click();
   await expect(editor).toBeHidden();
 
   await page.getByRole("button", { name: /所有任务/ }).click();
+  await page.getByRole("button", { name: "安排到今天：整理纪要" }).click();
   await page.getByRole("button", { name: "添加任务", exact: true }).click();
   await editor.getByLabel("任务名称").fill("练英语");
   await editor
@@ -134,7 +137,7 @@ try {
     occurrenceDialog.getByRole("button", { name: "查看执行记录", exact: true }),
   ).toHaveCount(0);
   await occurrenceDialog
-    .getByRole("textbox", { name: "本次阶段目标" })
+    .getByRole("textbox", { name: "本次范围" })
     .fill("跟读五分钟");
   await occurrenceDialog.getByRole("button", { name: "保存本次范围" }).click();
   await expect(occurrence.locator(".stage-goal")).toContainText("跟读五分钟");
@@ -195,9 +198,11 @@ try {
     .click();
   await expect(ordinary).toContainText("临时安排");
   await ordinary.getByRole("button", { name: "整理纪要", exact: true }).click();
-  await editOrdinary.getByText("安排一次推进", { exact: true }).click();
-  await editOrdinary.getByLabel("本次阶段目标").fill("整理四个要点");
-  await editOrdinary.getByRole("button", { name: "保存并安排" }).click();
+  const temporaryDialog = page.getByRole("dialog", { name: "本次详情" });
+  await temporaryDialog
+    .getByRole("textbox", { name: "本次范围" })
+    .fill("整理四个要点");
+  await temporaryDialog.getByRole("button", { name: "保存本次范围" }).click();
   await expect(ordinary).toContainText("整理四个要点");
 
   // 用保存的 Agent 方案验证真实 IPC、方案卡和部分接受。

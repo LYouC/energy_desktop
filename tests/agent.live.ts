@@ -111,7 +111,12 @@ const task = { ...newTask(), title: "英语", description: "完成面试英语�
 let planned = applyCommand(basic, {
   type: "saveTask",
   task,
-  arrangement: { date: localDate(), scope: "练习二十分钟" },
+});
+planned = applyCommand(planned, {
+  type: "schedule",
+  taskId: task.id,
+  date: localDate(),
+  scope: "练习二十分钟",
 });
 await run("S08 明确改期", planned, "把英语移到明天，今天不做了。", (next) => {
   assert(!next.arrangements.some((a) => a.date === localDate()));

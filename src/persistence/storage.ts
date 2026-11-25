@@ -10,9 +10,13 @@ import { applyCommand } from "../domain/operations";
 import { synchronizeRecurrence } from "../domain/recurrence";
 import { applyAgentTurn } from "../agent/turn";
 import { conversationLimit, trimConversations } from "../domain/conversations";
-import { migrateWorkspaceProposals, migrateWorkspaceV1 } from "./migrations";
+import {
+  migrateWorkspaceProposals,
+  migrateWorkspaceV1,
+  migrateWorkspaceV5,
+} from "./migrations";
 
-const workspaceVersion = 5;
+const workspaceVersion = 6;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -40,8 +44,10 @@ export class WorkspaceDatabase {
         if (row && version < 2) {
           const migrated = migrateWorkspaceV1(row.payload);
           this.writeSnapshot(migrated);
-        } else if (row && version < workspaceVersion) {
+        } else if (row && version < 5) {
           this.writeSnapshot(migrateWorkspaceProposals(row.payload));
+        } else if (row && version === 5) {
+          this.writeSnapshot(migrateWorkspaceV5(row.payload));
         }
         this.db.exec(`PRAGMA user_version=${workspaceVersion}`);
       });

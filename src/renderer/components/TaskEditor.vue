@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed } from "vue";
 import Modal from "./Modal.vue";
 import Button from "./ui/button/Button.vue";
 import { useWorkspace } from "@/stores/workspace";
@@ -110,32 +110,7 @@ const open = computed({
 const error = ref("");
 const deleting = ref(false);
 const busy = ref(false);
-const scheduleDate = ref(props.date);
-const scope = ref("");
-const temporaryToday = computed(
-  () =>
-    !!(
-      props.fromToday &&
-      savedRecurrence.value &&
-      scheduleDate.value === props.date
-    ) &&
-    store.state.arrangements.some(
-      (item) =>
-        item.taskId === props.task.id &&
-        item.date === props.date &&
-        !item.recurrence,
-    ),
-);
-watch(
-  scheduleDate,
-  (date) => {
-    scope.value =
-      store.state.arrangements.find(
-        (item) => item.taskId === props.task.id && item.date === date,
-      )?.scope || "";
-  },
-  { immediate: true },
-);
+
 const existing = computed(() =>
   store.state.tasks.some((task) => task.id === props.task.id),
 );
@@ -162,7 +137,7 @@ const parentOptions = computed(() => {
   const descendants = taskSubtreeIds(store.state.tasks, [draft.value.id]);
   return store.state.tasks.filter((task) => !descendants.has(task.id));
 });
-async function save(arrange = false, addChild = false) {
+async function save(addChild = false) {
   if (busy.value) return;
   if (ruleError.value) {
     error.value = ruleError.value;
@@ -174,9 +149,6 @@ async function save(arrange = false, addChild = false) {
     await store.dispatch({
       type: "saveTask",
       task: { ...draft.value, recurrence: recurrence.value },
-      arrangement: arrange
-        ? { date: scheduleDate.value, scope: scope.value }
-        : undefined,
     });
     if (addChild) emit("edit", newTask(draft.value.id));
     else emit("close");
@@ -298,7 +270,7 @@ async function remove() {
         </select></label
       >
       <p v-if="draft.status === 'done' && !effectiveRule" class="notice">
-        请确认这件事已经完成。子任务或今日阶段完成，不会自动完成父任务。
+        请确认这件事已经完成。子任务完成，不会自动完成父任务。
       </p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
       <div class="form-actions repeat-form-actions">
@@ -336,31 +308,7 @@ async function remove() {
           >{{ savedRecurrence ? "确认删除重复任务" : "确认删除" }}</Button
         >
       </div>
-      <details v-if="!effectiveRule || temporaryToday" class="form-section">
-        <summary>安排一次推进</summary>
-        <div class="form-grid">
-          <label
-            >推进日期<input
-              v-model="scheduleDate"
-              type="date"
-              :readonly="temporaryToday"
-          /></label>
-          <label
-            >本次阶段目标<input
-              v-model="scope"
-              placeholder="这一天推进到哪里？"
-          /></label>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          :disabled="
-            busy || !draft.title.trim() || !scope.trim() || !scheduleDate
-          "
-          @click="save(true)"
-          >保存并安排</Button
-        >
-      </details>
+
       <section v-if="existing" class="form-section">
         <h3>子任务</h3>
         <button
@@ -376,7 +324,7 @@ async function remove() {
           type="button"
           variant="outline"
           :disabled="busy || !draft.title.trim()"
-          @click="save(false, true)"
+          @click="save(true)"
           >添加子任务</Button
         >
       </section>
