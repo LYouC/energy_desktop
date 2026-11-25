@@ -37,9 +37,34 @@ try {
   await page
     .getByRole("button", { name: "完成任务：今天唯一的预计任务" })
     .press("Space");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = await window.desktop.load();
+        return {
+          status: state.tasks.find(({ id }) => id === "last-due")?.status,
+          arrangements: state.arrangements.length,
+        };
+      }),
+    )
+    .toEqual({ status: "done", arrangements: 0 });
+  const completed = page.locator(".today-completed");
+  const completedSummary = completed.locator(":scope > summary");
+  const due = page.getByRole("region", { name: "预计今天完成" });
+  await expect(due).toHaveCount(0);
+  await expect(completedSummary).toHaveText("今日已完成 1 项");
+  await expect(completedSummary).toBeFocused();
+  await expect(page.locator(".empty-state")).toHaveCount(0);
+  await page.reload();
+  await expect(completedSummary).toHaveText("今日已完成 1 项");
+  await completedSummary.click();
+  await completed
+    .getByRole("button", { name: "恢复任务：今天唯一的预计任务" })
+    .press("Space");
   await expect(
-    page.getByRole("heading", { name: "今天，留一点余地。" }),
+    due.getByRole("button", { name: "完成任务：今天唯一的预计任务" }),
   ).toBeFocused();
+  await expect(completedSummary).toHaveCount(0);
   await page.evaluate(async () => {
     let state = await window.desktop.load();
     const now = new Date();
@@ -47,6 +72,7 @@ try {
     const apply = async (command) => {
       state = await window.desktop.execute(state.revision, command);
     };
+    await apply({ type: "deleteTask", id: "last-due" });
     await apply({ type: "energy", value: "有些疲惫" });
     for (const [id, title, scope, done] of [
       ["laundry", "洗衣服", "晾好洗完的衣服", true],
@@ -64,7 +90,7 @@ try {
           status: "doing",
           parentId: null,
           startDate: "",
-          expectedDate: "",
+          expectedDate: id === "legacy" ? date : "",
           updatedAt: now.toISOString(),
           version: 0,
         },
@@ -103,13 +129,10 @@ try {
   await page.reload();
   const focus = page.locator(".task-card.focused");
   const queue = page.getByRole("region", { name: "其余待推进" });
-  const completed = page.locator(".today-completed");
-  const completedSummary = completed.locator(":scope > summary");
   await expect(page.locator(".today-plan > :first-child")).toHaveClass(
     /focused/,
   );
   await expect(focus).toContainText("写博客");
-  const due = page.getByRole("region", { name: "预计今天完成" });
   await expect(due).toBeVisible();
   expect((await focus.boundingBox()).y).toBeLessThan(
     (await due.boundingBox()).y,
@@ -174,9 +197,7 @@ try {
   await expect(page.locator(".today-finished")).toHaveText(
     "已安排的事项均已完成，另有 1 项预计今天完成",
   );
-  await due
-    .getByRole("button", { name: "完成任务：预计完成提醒" })
-    .press("Space");
+  await due.getByRole("button", { name: "完成任务：预计完成提醒" }).click();
   await expect(due).toHaveCount(0);
   await expect(page.locator(".today-finished")).toHaveText(
     "今日安排已全部完成",
@@ -192,7 +213,11 @@ try {
       page.locator(".task-list-row").filter({ hasText: title }),
     ).toContainText("整体完成");
   await page.getByRole("button", { name: /^今日安排/ }).click();
+  await expect(completedSummary).toHaveText("今日已完成 7 项");
   await completedSummary.click();
+  await expect(
+    completed.getByRole("button", { name: "预计完成提醒", exact: true }),
+  ).toBeVisible();
   const blog = completed.locator("article").filter({ hasText: "写博客" });
   await blog.getByRole("button", { name: "恢复任务", exact: true }).click();
   await expect(focus).toContainText("写博客");
@@ -216,7 +241,7 @@ try {
   ).toContainText("整体完成");
   expect(errors).toEqual([]);
   console.log(
-    "PASS: focus-first, queue ordering, completion, restoration, light/dark themes, narrow layout",
+    "PASS: focus-first, queue ordering, scheduled and unscheduled completion, restoration, light/dark themes, narrow layout",
   );
 } finally {
   await app.close();

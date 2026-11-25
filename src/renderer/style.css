@@ -481,6 +481,9 @@ nav button span {
 .today-completed {
   border-block: 1px solid var(--line);
 }
+details.today-completed {
+  margin-top: 16px;
+}
 .today-completed summary {
   padding: 10px 2px;
   color: var(--muted);
@@ -668,14 +671,16 @@ nav button span {
 .today-due {
   margin-block: 16px 14px;
 }
-.today-due li {
+.today-due li,
+.today-completed-tasks li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 2px;
   border-bottom: 1px solid var(--line);
 }
-.today-due .task-name {
+.today-due .task-name,
+.today-completed-tasks .task-name {
   flex: 1;
   text-align: left;
 }

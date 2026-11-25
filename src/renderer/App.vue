@@ -44,6 +44,7 @@ import {
   nextRecurrenceDate,
 } from "../domain/recurrence";
 import {
+  completedUnscheduledTasksDue,
   isArrangementDone,
   isArrangementPending,
   schedulableTodayTasks,
@@ -216,6 +217,9 @@ const arrangements = computed(() =>
 );
 const pending = computed(() => arrangements.value.filter((item) => !item.done));
 const dueToday = computed(() => unscheduledTasksDue(store.state, date.value));
+const completedDueToday = computed(() =>
+  completedUnscheduledTasksDue(store.state, date.value),
+);
 const dueTaskIds = computed(
   () => new Set(dueToday.value.map((task) => task.id)),
 );
@@ -224,10 +228,14 @@ const schedulableTodayIds = computed(
     new Set(schedulableTodayTasks(store.state, date.value).map(({ id }) => id)),
 );
 const schedulingToday = ref(false);
-async function completeDueTask(task: Task, keyboard: boolean) {
+async function setDueTaskDone(
+  taskId: string,
+  done: boolean,
+  keyboard: boolean,
+) {
   try {
-    await store.dispatch({ type: "setTaskDone", taskId: task.id, done: true });
-    if (keyboard) await focusStageControl(task.id);
+    await store.dispatch({ type: "setTaskDone", taskId, done });
+    if (keyboard) await focusStageControl(taskId);
   } catch {
     // The workspace displays the failure and reloads the latest data.
   }
@@ -274,14 +282,23 @@ async function focusStageControl(taskId: string) {
   await nextTick();
   if (view.value !== "today" || document.activeElement !== document.body)
     return;
+  const selector = `[data-stage-task-id="${CSS.escape(taskId)}"]`;
   const exact = document.querySelector<HTMLElement>(
-    `.today-plan [data-stage-task-id="${CSS.escape(taskId)}"]`,
+    `.today-plan ${selector}, .today-due ${selector}, details.today-completed[open] ${selector}`,
   );
-  const target = exact?.getClientRects().length
-    ? exact
-    : (document.querySelector<HTMLElement>(
-        ".today-plan .focused .check, .today-due .check, .today-plan .today-completed summary",
-      ) ?? document.querySelector<HTMLElement>(".today-heading h1"));
+  const completedSummary = document.querySelector<HTMLElement>(
+    "details.today-completed > summary",
+  );
+  const target =
+    (exact?.getClientRects().length ? exact : null) ??
+    (completedDueToday.value.some(({ id }) => id === taskId)
+      ? completedSummary
+      : null) ??
+    document.querySelector<HTMLElement>(
+      ".today-plan .focused .check, .today-due .check",
+    ) ??
+    completedSummary ??
+    document.querySelector<HTMLElement>(".today-heading h1");
   target?.focus();
 }
 const todayGroups = computed(() =>
@@ -317,10 +334,10 @@ const completedGroups = computed(() => {
   const open = new Set(pendingGroups.value.map(({ item }) => item.taskId));
   return todayGroups.value.filter(({ item }) => !open.has(item.taskId));
 });
-const completedGroupCount = computed(() =>
+const todayCompletedCount = computed(() =>
   completedGroups.value.reduce(
     (count, group) => count + 1 + group.subtasks.length,
-    0,
+    completedDueToday.value.length,
   ),
 );
 const upcomingRepeatDays = computed(() => {
@@ -812,7 +829,9 @@ async function energy(event: Event) {
             >
           </div>
           <div
-            v-if="!arrangements.length && !dueToday.length"
+            v-if="
+              !arrangements.length && !dueToday.length && !todayCompletedCount
+            "
             class="empty-state"
           >
             <Sun :size="28" />
@@ -895,22 +914,6 @@ async function energy(event: Event) {
                 @moved="moved"
               />
             </section>
-            <details v-if="completedGroups.length" class="today-completed">
-              <summary>
-                今日已完成 <span>{{ completedGroupCount }} 项</span>
-              </summary>
-              <TaskCard
-                v-for="{ item, subtasks } in completedGroups"
-                :key="item.taskId"
-                :task="item.task"
-                :arrangement="item"
-                :subtasks="subtasks"
-                :due-task-ids="dueTaskIds"
-                @edit="edit"
-                @occurrence="openOccurrence"
-                @focus-stage="focusStageControl"
-              />
-            </details>
           </div>
           <section
             v-if="dueToday.length && !selecting"
@@ -927,7 +930,8 @@ async function energy(event: Event) {
                   type="button"
                   :aria-label="`完成任务：${task.title}`"
                   :aria-pressed="false"
-                  @click="completeDueTask(task, $event.detail === 0)"
+                  :data-stage-task-id="task.id"
+                  @click="setDueTaskDone(task.id, true, $event.detail === 0)"
                 >
                   <Square :size="17" />
                 </button>
@@ -944,6 +948,42 @@ async function energy(event: Event) {
               </li>
             </ul>
           </section>
+          <details
+            v-if="todayCompletedCount && !selecting"
+            class="today-completed"
+          >
+            <summary>
+              今日已完成 <span>{{ todayCompletedCount }} 项</span>
+            </summary>
+            <TaskCard
+              v-for="{ item, subtasks } in completedGroups"
+              :key="item.taskId"
+              :task="item.task"
+              :arrangement="item"
+              :subtasks="subtasks"
+              :due-task-ids="dueTaskIds"
+              @edit="edit"
+              @occurrence="openOccurrence"
+              @focus-stage="focusStageControl"
+            />
+            <ul v-if="completedDueToday.length" class="today-completed-tasks">
+              <li v-for="task in completedDueToday" :key="task.id">
+                <button
+                  class="check"
+                  type="button"
+                  :aria-label="`恢复任务：${task.title}`"
+                  :aria-pressed="true"
+                  :data-stage-task-id="task.id"
+                  @click="setDueTaskDone(task.id, false, $event.detail === 0)"
+                >
+                  <Check :size="17" />
+                </button>
+                <button class="task-name" type="button" @click="edit(task)">
+                  {{ task.title }}
+                </button>
+              </li>
+            </ul>
+          </details>
           <p v-if="historicalUnfinished" class="notice today-notice">
             有
             {{ historicalUnfinished }}

@@ -53,7 +53,7 @@ export function isArrangementPending(
   );
 }
 
-export function schedulableTodayTasks(state: State, date: string) {
+function unplannedOrdinaryTasks(state: State, date: string) {
   const recurrences = effectiveRecurrences(state.tasks);
   const planned = new Set(
     state.arrangements
@@ -63,14 +63,23 @@ export function schedulableTodayTasks(state: State, date: string) {
   for (const { arrangement } of state.skippedOccurrences ?? [])
     if (arrangement.date === date) planned.add(arrangement.taskId);
   return state.tasks.filter(
-    (task) =>
-      isTaskOpen(task) && !recurrences.get(task.id) && !planned.has(task.id),
+    (task) => !recurrences.get(task.id) && !planned.has(task.id),
   );
+}
+
+export function schedulableTodayTasks(state: State, date: string) {
+  return unplannedOrdinaryTasks(state, date).filter(isTaskOpen);
 }
 
 export function unscheduledTasksDue(state: State, date: string) {
   return schedulableTodayTasks(state, date).filter(
     (task) => task.expectedDate === date,
+  );
+}
+
+export function completedUnscheduledTasksDue(state: State, date: string) {
+  return unplannedOrdinaryTasks(state, date).filter(
+    (task) => task.status === "done" && task.expectedDate === date,
   );
 }
 
