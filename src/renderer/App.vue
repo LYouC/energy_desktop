@@ -42,6 +42,7 @@ import {
 import {
   arrangementAncestorIds,
   nextRecurrenceDate,
+  taskAncestorIds,
 } from "../domain/recurrence";
 import {
   completedUnscheduledTasksDue,
@@ -98,6 +99,7 @@ const shellStyle = computed(() => {
 const search = ref("");
 const importanceFilter = ref<Task["importance"] | "all">("all");
 const typeFilter = ref<"all" | "single" | "repeated">("all");
+const completionFilter = ref<"all" | "done" | "incomplete">("all");
 const {
   managing: selecting,
   count: selectedCount,
@@ -174,6 +176,20 @@ onMounted(async () => {
   await store.load();
   applyTheme();
 });
+const tasksById = computed(
+  () => new Map(store.state.tasks.map((task) => [task.id, task])),
+);
+function matchesCompletionFilter(task: Task) {
+  if (completionFilter.value === "all") return true;
+  const tasks = tasksById.value;
+  const rootId = taskAncestorIds(tasks, task.id).at(-1) ?? task.id;
+  const root = tasks.get(rootId) ?? task;
+  const done =
+    root.status === "done" ||
+    (Boolean(store.recurrences.get(root.id)) &&
+      completedTodayIds.value.has(root.id));
+  return done === (completionFilter.value === "done");
+}
 const visibleTasks = computed(() =>
   (view.value === "completed"
     ? store.state.tasks.filter((task) => task.status === "done")
@@ -187,11 +203,9 @@ const visibleTasks = computed(() =>
       (view.value !== "all" ||
         typeFilter.value === "all" ||
         (typeFilter.value === "repeated") ===
-          Boolean(store.recurrences.get(task.id))),
+          Boolean(store.recurrences.get(task.id))) &&
+      (view.value !== "all" || matchesCompletionFilter(task)),
   ),
-);
-const tasksById = computed(
-  () => new Map(store.state.tasks.map((task) => [task.id, task])),
 );
 const taskRows = computed(() =>
   taskGroupRows(
@@ -1043,6 +1057,16 @@ async function energy(event: Event) {
               </option>
               <option :value="null">未设置重要性</option>
             </select>
+            <select
+              v-if="view === 'all'"
+              v-model="completionFilter"
+              class="task-list-filter"
+              aria-label="按完成状态筛选"
+            >
+              <option value="all">全部状态</option>
+              <option value="done">已完成</option>
+              <option value="incomplete">未完成</option>
+            </select>
             <label class="search"
               ><Search :size="15" /><input
                 v-model="search"
@@ -1213,7 +1237,9 @@ async function energy(event: Event) {
             {{
               search ||
               (view === "all" &&
-                (importanceFilter !== "all" || typeFilter !== "all"))
+                (importanceFilter !== "all" ||
+                  typeFilter !== "all" ||
+                  completionFilter !== "all"))
                 ? "没有匹配的任务。"
                 : "这里还没有任务记录。"
             }}

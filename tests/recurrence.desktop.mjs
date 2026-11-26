@@ -371,7 +371,35 @@ try {
   await childCheck.click();
   await page.getByRole("button", { name: /所有任务/ }).click();
   await expect(childRow).toContainText("今日已完成");
+  const completionFilter = page.getByLabel("按完成状态筛选");
+  await completionFilter.selectOption("done");
+  await expect(childRow).toBeVisible();
+  await completionFilter.selectOption("incomplete");
+  await expect(childRow).toHaveCount(0);
+  await completionFilter.selectOption("all");
+  await childRow.click();
+  const parentField = taskEditor.getByLabel("所属任务");
+  const parentId = await parentField.inputValue();
+  await parentField.selectOption({ label: "独立任务" });
+  await taskEditor
+    .getByRole("button", { name: "保存任务", exact: true })
+    .click();
+  const typeFilter = page.getByLabel("按任务类型筛选");
+  await typeFilter.selectOption("single");
+  await expect(childRow).toContainText("今日已完成");
+  await completionFilter.selectOption("done");
+  await expect(childRow).toHaveCount(0);
+  await completionFilter.selectOption("incomplete");
+  await expect(childRow).toBeVisible();
+  await completionFilter.selectOption("all");
+  await typeFilter.selectOption("all");
+  await childRow.click();
+  await parentField.selectOption(parentId);
+  await taskEditor
+    .getByRole("button", { name: "保存任务", exact: true })
+    .click();
   await page.getByRole("button", { name: "已完成", exact: true }).click();
+  await expect(completionFilter).toHaveCount(0);
   const completedStages = page.getByRole("region", {
     name: "今日已完成的重复任务",
   });

@@ -98,16 +98,8 @@ try {
   }
   await page.locator(".task-child-name").click();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
-  for (const theme of ["light", "dark"]) {
-    await settings(theme);
-    const ratios = await page.evaluate(() => {
-      const selectors = [
-        ".brand small",
-        ".quiet-note",
-        ".profile small",
-        ".energy .eyebrow",
-        ".chat-header > span",
-      ];
+  const contrastRatios = (selectors) =>
+    page.evaluate((selectors) => {
       function luminance(color) {
         const values = color
           .match(/[\d.]+/g)
@@ -140,13 +132,32 @@ try {
           ratio: (values[1] + 0.05) / (values[0] + 0.05),
         };
       });
-    });
+    }, selectors);
+  for (const theme of ["light", "dark"]) {
+    await settings(theme);
+    const ratios = await contrastRatios([
+      ".brand small",
+      ".quiet-note",
+      ".profile small",
+      ".energy .eyebrow",
+      ".chat-header > span",
+    ]);
+    await page.getByRole("button", { name: /所有任务/ }).click();
+    await page.getByLabel("按重要性筛选").focus();
+    await page.keyboard.press("Tab");
+    const completionFilter = page.getByLabel("按完成状态筛选");
+    await expect(completionFilter).toBeFocused();
+    await expect(completionFilter).toHaveCSS("outline-style", "solid");
+    ratios.push(
+      ...(await contrastRatios(['select[aria-label="按完成状态筛选"]'])),
+    );
     for (const result of ratios)
       expect(
         result.ratio,
         `${theme} ${result.selector} contrast`,
       ).toBeGreaterThanOrEqual(4.5);
-    checks.push(`${theme}导航和能量的文字对比度均达到4.5:1`);
+    checks.push(`${theme}导航、能量和完成状态筛选的文字对比度均达到4.5:1`);
+    await page.getByRole("button", { name: /今日安排/ }).click();
   }
   await page.setViewportSize({ width: 800, height: 720 });
   await page.getByRole("button", { name: "查看任务详情" }).click();

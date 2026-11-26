@@ -127,10 +127,75 @@ try {
   await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
   state = await page.evaluate(() => window.desktop.load());
   expect(state.tasks.find((task) => task.id === parent.id).status).toBe("todo");
+  const completionFilter = page.getByLabel("按完成状态筛选");
+  const typeFilter = page.getByLabel("按任务类型筛选");
+  const listRows = page.locator(".task-list-row");
+  const listParent = listRows.filter({ hasText: "买洗衣液" });
+  const listChild = listRows.filter({ hasText: "选择规格" });
+  const listCount = page.locator(".list-heading");
+  const listSearch = page.getByLabel("搜索任务");
+  async function saveTaskStatus(row, status) {
+    await row.click();
+    await dialog.getByLabel("任务状态").selectOption(status);
+    await dialog.getByRole("button", { name: "保存任务", exact: true }).click();
+  }
+  await expect(completionFilter.locator("option")).toHaveText([
+    "全部状态",
+    "已完成",
+    "未完成",
+  ]);
+  await expect(completionFilter).toHaveValue("all");
+  await expect(listCount).toContainText("2 项");
+  await completionFilter.selectOption("done");
+  await expect(listCount).toContainText("0 项");
+  await expect(page.getByText("没有匹配的任务。")).toBeVisible();
+  await completionFilter.selectOption("incomplete");
+  await expect(listCount).toContainText("2 项");
+  await expect(page.locator(".task-list-item.is-nested")).toContainText(
+    "选择规格",
+  );
+
+  await typeFilter.selectOption("single");
+  await page.getByLabel("按重要性筛选").selectOption("high");
+  await listSearch.fill("洗衣液");
+  await expect(listCount).toContainText("1 项");
+  await expect(listRows).toContainText(["买洗衣液"]);
+  await typeFilter.selectOption("repeated");
+  await expect(listCount).toContainText("0 项");
+  await typeFilter.selectOption("all");
+  await page.getByLabel("按重要性筛选").selectOption("all");
+  await listSearch.fill("选择规格");
+  await expect(listChild).toBeVisible();
+  await completionFilter.selectOption("done");
+  await expect(listChild).toHaveCount(0);
+  await completionFilter.selectOption("all");
+  await listSearch.clear();
+
+  await saveTaskStatus(listParent, "done");
+  await saveTaskStatus(listChild, "todo");
+  await completionFilter.selectOption("done");
+  await expect(listCount).toContainText("2 项");
+  await expect(page.locator(".task-list-item.is-nested")).toContainText(
+    "选择规格",
+  );
+  await page.getByRole("button", { name: "管理", exact: true }).click();
+  await page.getByRole("button", { name: "全选", exact: true }).click();
+  await expect(listParent).toHaveAttribute("aria-pressed", "true");
+  await expect(listChild).toHaveAttribute("aria-pressed", "true");
+  await completionFilter.selectOption("incomplete");
+  await expect(listRows).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "删除选中" })).toBeDisabled();
+  await completionFilter.selectOption("all");
+  await expect(listParent).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await saveTaskStatus(listParent, "todo");
+  await saveTaskStatus(listChild, "done");
+
   await page.getByRole("button", { name: "我的空间 本地保存" }).click();
   await page.getByLabel("主题").selectOption("dark");
   await page.getByRole("button", { name: "保存设置", exact: true }).click();
   await expect(page.getByLabel("按重要性筛选")).toBeVisible();
+  await expect(completionFilter).toBeVisible();
   await expect(page.locator(".task-importance")).toBeVisible();
   await page.locator(".task-list-row").filter({ hasText: "买洗衣液" }).click();
   await page.screenshot({ path: "test-results/task-fields-dark.png" });
@@ -140,6 +205,7 @@ try {
     .toBeLessThanOrEqual(800);
   await page.screenshot({ path: "test-results/task-fields-narrow.png" });
   await page.keyboard.press("Escape");
+  await expect(completionFilter).toBeInViewport({ ratio: 1 });
   await page.getByRole("button", { name: "添加任务", exact: true }).click();
   const today = await page.evaluate(() =>
     new Date().toLocaleDateString("sv-SE"),
