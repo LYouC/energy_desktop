@@ -16,14 +16,20 @@ export function arrangementAncestorIds(
   tasks: ReadonlyMap<string, Task>,
   item: Arrangement,
 ) {
-  return item.recurrence?.ancestorIds ?? taskAncestorIds(tasks, item.taskId);
+  return item.recurrence
+    ? item.recurrence.ancestorIds
+    : taskAncestorIds(tasks, item.taskId);
 }
 
 export function occurrenceSnapshot(
   tasks: ReadonlyMap<string, Task>,
   task: Task,
 ) {
-  return { title: task.title, ancestorIds: taskAncestorIds(tasks, task.id) };
+  return {
+    title: task.title,
+    ancestorIds: taskAncestorIds(tasks, task.id),
+    version: 0,
+  };
 }
 
 export function effectiveRecurrences(tasks: Task[]) {
@@ -58,7 +64,7 @@ export function findOccurrence(
   const matches = (item: Arrangement) =>
     item.taskId === taskId && item.date === date && item.recurrence;
   return skipped
-    ? state.skippedOccurrences?.find(({ arrangement }) => matches(arrangement))
+    ? state.skippedOccurrences.find(({ arrangement }) => matches(arrangement))
         ?.arrangement
     : state.arrangements.find(matches);
 }
@@ -103,25 +109,20 @@ export function nextRecurrenceDate(
 
 export function synchronizeRecurrence(state: State, date: string): boolean {
   const cursors = new Map(
-    state.repeatCursors?.map((cursor) => [cursor.taskId, cursor]),
+    state.repeatCursors.map((cursor) => [cursor.taskId, cursor]),
   );
   const previouslySkipped = state.skippedOccurrences;
   let changed = false;
   const tasks = new Map(state.tasks.map((task) => [task.id, task]));
-  if (previouslySkipped?.some((item) => item.arrangement.date < date)) {
+  if (previouslySkipped.some((item) => item.arrangement.date < date)) {
     state.skippedOccurrences = previouslySkipped.filter(
       (item) => item.arrangement.date >= date,
     );
     changed = true;
   }
-  const skipped =
-    state.skippedOccurrences?.map(({ arrangement }) => arrangement) ?? [];
-  for (const item of [...state.arrangements, ...skipped]) {
-    if (item.date === date && item.recurrence && !item.recurrence.ancestorIds) {
-      item.recurrence.ancestorIds = taskAncestorIds(tasks, item.taskId);
-      changed = true;
-    }
-  }
+  const skipped = state.skippedOccurrences.map(
+    ({ arrangement }) => arrangement,
+  );
 
   const recurrences = effectiveRecurrences(state.tasks);
   const templates = state.tasks.flatMap((task) => {
@@ -183,7 +184,6 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
     changed = true;
   }
 
-  if (changed && (state.repeatCursors || cursors.size))
-    state.repeatCursors = [...cursors.values()];
+  if (changed) state.repeatCursors = [...cursors.values()];
   return changed;
 }

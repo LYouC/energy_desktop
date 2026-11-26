@@ -30,7 +30,7 @@ test("重复父任务的两个子任务跟随结算，次日重新开始", (t) =
     ["工作日日常", "早睡早起", "读书"],
   );
   db.execute(db.load().revision, {
-    type: "stage",
+    type: "setOccurrenceDone",
     taskId: children[0].id,
     date,
     done: true,
@@ -112,7 +112,6 @@ test("已有子任务获得父规则，父规则更新保留当天，独立规�
   for (const task of [parent, child, grandchild, independent])
     execute({ type: "saveTask", task });
   execute({ type: "schedule", taskId: child.id, date, scope: "保留既有范围" });
-  execute({ type: "stage", taskId: child.id, date, done: true });
   const setParentRule = (weekdays: number[]) =>
     execute({
       type: "saveTask",
@@ -122,6 +121,7 @@ test("已有子任务获得父规则，父规则更新保留当天，独立规�
       },
     });
   setParentRule([1, 2]);
+  execute({ type: "setOccurrenceDone", taskId: child.id, date, done: true });
   const first = db.load().arrangements;
   assert.equal(first.length, 3);
   assert.deepEqual(
@@ -131,7 +131,7 @@ test("已有子任务获得父规则，父规则更新保留当天，独立规�
       date,
       scope: "保留既有范围",
       done: true,
-      recurrence: { title: "练习", ancestorIds: [parent.id] },
+      recurrence: { title: "练习", ancestorIds: [parent.id], version: 1 },
     },
   );
   setParentRule([3]);

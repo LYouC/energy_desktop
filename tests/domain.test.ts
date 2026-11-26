@@ -90,7 +90,7 @@ test("旧方案被阻止，失败前后原状态一致", () => {
   );
   assert.deepEqual(state, before);
 });
-test("能量更新与阶段完成各自独立", () => {
+test("能量更新与任务完成各自独立", () => {
   let state = fixture();
   state = applyCommand(state, {
     type: "schedule",
@@ -102,13 +102,23 @@ test("能量更新与阶段完成各自独立", () => {
   state = applyCommand(state, { type: "energy", value: "需要恢复" });
   assert.deepEqual(state.arrangements, arrangements);
   assert.equal(state.messages.length, 0);
+  assert.throws(
+    () =>
+      applyCommand(state, {
+        type: "setOccurrenceDone",
+        taskId: state.tasks[0].id,
+        date: localDate(),
+        done: true,
+      }),
+    /重复任务已变化/,
+  );
   state = applyCommand(state, {
-    type: "stage",
+    type: "setTaskDone",
     taskId: state.tasks[0].id,
-    date: localDate(),
     done: true,
   });
-  assert.equal(state.tasks[0].status, "todo");
+  assert.equal(state.tasks[0].status, "done");
+  assert.deepEqual(state.arrangements, arrangements);
   assert.equal(
     buildContext(state, state.activeSessionId).energy.value,
     "需要恢复",
@@ -224,31 +234,4 @@ test("最近结果按更新时间降序保留十条", () => {
   assert.equal(results.length, 10);
   assert.equal(results[0].title, "任务11");
   assert.equal(results[9].title, "任务2");
-});
-test("拒绝旧方案的一部分不能恢复另一部分的有效性", () => {
-  let state = fixture();
-  const proposal = propose(state);
-  proposal.legacy = true;
-  proposal.cards[1] = { ...proposal.cards[0], id: crypto.randomUUID() };
-  state = applyCommand(state, { type: "proposal", proposal });
-  state = applyCommand(state, {
-    type: "saveTask",
-    task: { ...state.tasks[0], description: "修改目标" },
-  });
-  state = applyCommand(state, {
-    type: "resolve",
-    proposalId: proposal.id,
-    cardIds: [proposal.cards[0].id],
-    accept: false,
-  });
-  assert.throws(
-    () =>
-      applyCommand(state, {
-        type: "resolve",
-        proposalId: proposal.id,
-        cardIds: [proposal.cards[1].id],
-        accept: true,
-      }),
-    /重新分析/,
-  );
 });

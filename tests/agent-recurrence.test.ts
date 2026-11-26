@@ -243,8 +243,7 @@ test("现有普通任务首次设重复复用同日安排，改规则时今日�
       date: today,
       scope: "练第一段",
       done: true,
-      recurrence: { title: "练琴", ancestorIds: [] },
-      occurrenceVersion: 1,
+      recurrence: { title: "练琴", ancestorIds: [], version: 1 },
     },
   ]);
   assert.equal(weekly.tasks[0].status, "todo");

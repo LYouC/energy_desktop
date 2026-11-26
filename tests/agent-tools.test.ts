@@ -43,7 +43,7 @@ test("近期候选包含日期与计划命中，排除今天两区、结束、�
     task("ends", { expectedDate: through, parentId: "starts" }),
     task("future-plan"),
     task("day-eight", { expectedDate: "2027-01-06" }),
-    task("completed-plan"),
+    task("completed-plan", { status: "done" }),
     task("already-planned", { expectedDate: through }),
     task("due-today", { expectedDate: today }),
     task("complete", { expectedDate: through, status: "done" }),
@@ -57,10 +57,9 @@ test("近期候选包含日期与计划命中，排除今天两区、结束、�
   state.arrangements = [
     arrangement("future-plan", through),
     arrangement("future-plan", "2026-12-30"),
-    arrangement("future-plan", "2026-12-31", true),
     arrangement("future-plan", "2027-01-06"),
     arrangement("future-plan", "2026-12-28"),
-    arrangement("completed-plan", "2027-01-01", true),
+    arrangement("completed-plan", "2027-01-01"),
     arrangement("already-planned", today),
     arrangement("due-today", through),
     arrangement("deleted-task", through),
@@ -69,7 +68,7 @@ test("近期候选包含日期与计划命中，排除今天两区、结束、�
     {
       arrangement: {
         ...arrangement("skipped", today),
-        recurrence: { title: "已移除" },
+        recurrence: { title: "已移除", ancestorIds: [], version: 0 },
       },
       previousTaskIds: [],
       nextTaskIds: [],

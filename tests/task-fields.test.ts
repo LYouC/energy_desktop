@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { emptyState, newTask } from "../src/domain/model";
+import { commandSchema, emptyState, newTask } from "../src/domain/model";
 import {
   applyCommand,
   isArrangementPending,
@@ -50,11 +49,11 @@ test("移动今日任务组时保持各组内部的安排顺序", () => {
   );
   const childDone = applyCommand(
     state,
-    { type: "stage", taskId: child.id, date, done: true },
+    { type: "setTaskDone", taskId: child.id, done: true },
     date,
   );
   assert.throws(() => applyCommand(childDone, command, date), /安排已变化/);
-  assert.equal(childDone.arrangements[1].done, true);
+  assert.equal(childDone.tasks[1].status, "done");
 });
 
 test("两组交错时只交换相邻组，第三组不被越过", () => {
@@ -117,7 +116,7 @@ test("预计完成入口以提交时的日期和计划为准，重复点击不�
   );
   const done = applyCommand(
     arranged,
-    { type: "stage", taskId: task.id, date: today, done: true },
+    { type: "setTaskDone", taskId: task.id, done: true },
     today,
   );
   assert.deepEqual(
@@ -187,7 +186,7 @@ test("A22 所有任务可安排未来子任务，保留原日程、预计日期�
   assert.equal(updated?.expectedDate, future);
   const completed = applyCommand(
     next,
-    { type: "stage", taskId: task.id, date, done: true },
+    { type: "setTaskDone", taskId: task.id, done: true },
     date,
   );
   assert.deepEqual(
@@ -229,7 +228,7 @@ test("仍有当天移除记录的子任务不会从今日或所有任务入口�
   }
 });
 
-test("A21 整体完成覆盖各层一次性子任务，保留旧阶段与重复实例", () => {
+test("A21 整体完成覆盖各层一次性子任务，重复实例保持独立", () => {
   const date = "2026-11-23";
   const parent = { ...newTask(), title: "准备行程" };
   const child = { ...newTask(parent.id), title: "订票", expectedDate: date };
@@ -262,12 +261,8 @@ test("A21 整体完成覆盖各层一次性子任务，保留旧阶段与重复�
   assert.deepEqual(unscheduledTasksDue(completed, date), []);
   const context = buildContext(completed, state.activeSessionId, date);
   assert.deepEqual(
-    context.today.map((item) => [item.done, "taskDone" in item]),
-    [
-      [false, false],
-      [false, true],
-      [false, true],
-    ],
+    context.today.map((item) => item.done),
+    [false, true, true],
   );
   const restored = applyCommand(completed, { ...complete, done: false }, date);
   assert.deepEqual(
@@ -310,13 +305,18 @@ test("普通任务继承未来重复后，今天的临时安排可改范围并�
     isArrangementPending(state.arrangements[0], state.tasks[1], true),
     true,
   );
-  const stage = { type: "stage", taskId: child.id, date, done: true } as const;
-  const finished = applyCommand(state, stage, date);
+  const completion = {
+    type: "setOccurrenceDone",
+    taskId: child.id,
+    date,
+    done: true,
+  } as const;
+  const finished = applyCommand(state, completion, date);
   assert.equal(
     isArrangementPending(finished.arrangements[0], finished.tasks[1], true),
     false,
   );
-  const restored = applyCommand(finished, { ...stage, done: false }, date);
+  const restored = applyCommand(finished, { ...completion, done: false }, date);
   assert.equal(
     isArrangementPending(restored.arrangements[0], restored.tasks[1], true),
     true,
@@ -370,28 +370,18 @@ test("普通任务与子任务共用最小字段，名称以外可以留空", ()
   );
 });
 
-test("旧版任务和保存命令兼容用户标注，重开保留标注且允许清空", () => {
+test("保存任务要求提供重要性，重开保留标注且允许清空", () => {
   const filename = path.join(
     mkdtempSync(path.join(tmpdir(), "xixu-importance-")),
     "workspace.db",
   );
-  const { importance, ...task } = { ...newTask(), title: "旧任务", version: 1 };
-  const previous = { ...emptyState(), tasks: [task] };
-  const raw = new DatabaseSync(filename);
-  raw.exec(
-    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=2;",
-  );
-  raw
-    .prepare("INSERT INTO workspace VALUES(1, ?, ?)")
-    .run(previous.revision, JSON.stringify(previous));
-  raw.close();
-
   const db = new WorkspaceDatabase(filename);
-  const original = db.load();
-  assert.equal(original.tasks[0].importance, null);
-  const marked = db.execute(original.revision, {
+  const initial = db.load();
+  const task = { ...newTask(), title: "标注任务" };
+  assert.equal(task.importance, null);
+  const marked = db.execute(initial.revision, {
     type: "saveTask",
-    task: { ...original.tasks[0], importance: "high" },
+    task: { ...task, importance: "high" },
   });
   assert.equal(marked.tasks[0].importance, "high");
   db.close();
@@ -399,14 +389,14 @@ test("旧版任务和保存命令兼容用户标注，重开保留标注且允�
   const reopened = new WorkspaceDatabase(filename);
   const saved = reopened.load();
   assert.equal(saved.tasks[0].importance, "high");
-  const updated = reopened.execute(saved.revision, {
+  const { importance: _importance, ...incomplete } = saved.tasks[0];
+  assert.equal(
+    commandSchema.safeParse({ type: "saveTask", task: incomplete }).success,
+    false,
+  );
+  const cleared = reopened.execute(saved.revision, {
     type: "saveTask",
-    task: { ...task, version: saved.tasks[0].version, title: "修改旧任务" },
-  });
-  assert.equal(updated.tasks[0].importance, "high");
-  const cleared = reopened.execute(updated.revision, {
-    type: "saveTask",
-    task: { ...updated.tasks[0], importance },
+    task: { ...saved.tasks[0], importance: null },
   });
   assert.equal(cleared.tasks[0].importance, null);
   reopened.close();
@@ -463,7 +453,7 @@ test("Agent 从上下文读取用户标注，工具写入和草稿不能更改�
   }
 });
 
-test("安排、取消与阶段完成不改预计起止日期", () => {
+test("安排、取消与整体完成不改预计起止日期", () => {
   let state = applyCommand(emptyState(), {
     type: "saveTask",
     task: {
@@ -482,9 +472,8 @@ test("安排、取消与阶段完成不改预计起止日期", () => {
       scope: "写一部分",
     });
   state = applyCommand(state, {
-    type: "stage",
+    type: "setTaskDone",
     taskId: id,
-    date: "2026-11-18",
     done: true,
   });
   state = applyCommand(state, {
@@ -494,7 +483,7 @@ test("安排、取消与阶段完成不改预计起止日期", () => {
   });
   assert.equal(state.tasks[0].startDate, "2026-11-17");
   assert.equal(state.tasks[0].expectedDate, "2026-11-20");
-  assert.equal(state.tasks[0].status, "todo");
+  assert.equal(state.tasks[0].status, "done");
 });
 
 test("非法日期与完成早于开始被拒绝，允许同日及单独填写", () => {
@@ -524,110 +513,4 @@ test("非法日期与完成早于开始被拒绝，允许同日及单独填写",
       }),
     );
   assert.equal(initial.tasks.length, 0);
-});
-
-test("v1 数据库迁移保留任务、安排和会话，旧文本合入说明且仅迁移一次", () => {
-  const filename = path.join(
-    mkdtempSync(path.join(tmpdir(), "xixu-migrate-")),
-    "workspace.db",
-  );
-  const previous = {
-    ...emptyState(),
-    tasks: [
-      {
-        id: "parent",
-        version: 1,
-        title: "报告",
-        goal: "交付初稿",
-        deadline: "2026-11-20T14:00",
-        plannedDate: "2026-11-18",
-        expectedDate: "2026-11-19",
-        importance: "高",
-        status: "todo",
-        parentId: null,
-        dependencies: [],
-        background: "可能缺材料",
-        backgroundKind: "推测",
-        progress: "完成提纲",
-        obstacle: "",
-        nextStep: "写第一节",
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-  };
-  previous.arrangements.push({
-    taskId: "parent",
-    date: "2026-11-18",
-    scope: "写第一节",
-    done: false,
-  });
-  previous.sessions[0].draft = "未发送输入";
-  const previousProposal = {
-    id: "old",
-    sessionId: previous.activeSessionId,
-    createdAt: new Date().toISOString(),
-    changes: [
-      {
-        id: "change",
-        taskId: "parent",
-        taskVersion: 1,
-        label: "旧方案",
-        reason: "试用",
-        type: "update",
-        date: "",
-        scope: "",
-        children: [],
-        status: "pending",
-      },
-    ],
-  };
-  const raw = new DatabaseSync(filename);
-  raw.exec(
-    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=1;",
-  );
-  raw
-    .prepare("INSERT INTO workspace VALUES(1, ?, ?)")
-    .run(
-      previous.revision,
-      JSON.stringify({ ...previous, proposals: [previousProposal] }),
-    );
-  raw.close();
-  const db = new WorkspaceDatabase(filename);
-  const migrated = db.load();
-  assert.equal(migrated.tasks[0].startDate, "");
-  assert.equal(migrated.tasks[0].importance, null);
-  assert.equal(migrated.tasks[0].expectedDate, "2026-11-19");
-  assert.match(migrated.tasks[0].description, /交付初稿/);
-  assert.match(migrated.tasks[0].description, /背景（推测）：可能缺材料/);
-  assert.match(migrated.tasks[0].description, /截止要求：2026-11-20T14:00/);
-  assert.equal("deadline" in migrated.tasks[0], false);
-  assert.equal("plannedDate" in migrated.tasks[0], false);
-  assert.deepEqual(migrated.arrangements, previous.arrangements);
-  assert.equal(migrated.sessions[0].draft, "未发送输入");
-  assert.equal(migrated.proposals[0].cards[0].status, "rejected");
-  db.close();
-  const reopened = new WorkspaceDatabase(filename);
-  assert.deepEqual(reopened.load(), migrated);
-  reopened.close();
-});
-
-test("迁移失败回滚版本与原记录", () => {
-  const filename = path.join(
-    mkdtempSync(path.join(tmpdir(), "xixu-migrate-invalid-")),
-    "workspace.db",
-  );
-  const raw = new DatabaseSync(filename);
-  raw.exec(
-    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=1;",
-  );
-  raw.prepare("INSERT INTO workspace VALUES(1, 0, ?)").run('{"broken":true}');
-  raw.close();
-  assert.throws(() => new WorkspaceDatabase(filename));
-  const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 1);
-  assert.equal(
-    inspect.prepare("SELECT payload FROM workspace").get()?.payload,
-    '{"broken":true}',
-  );
-  inspect.close();
 });

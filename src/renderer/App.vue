@@ -198,22 +198,18 @@ const taskRows = computed(() =>
     taskGroups(visibleTasks.value, (task) => task.id, tasksById.value),
   ),
 );
-const todayRecords = computed(() =>
+const arrangements = computed(() =>
   store.state.arrangements
     .filter((item) => item.date === date.value)
     .flatMap((item) => {
       const task = tasksById.value.get(item.taskId);
-      return task || item.recurrence ? [{ ...item, task }] : [];
+      if (!task && !item.recurrence) return [];
+      const repeats = Boolean(store.recurrences.get(item.taskId));
+      const done = isArrangementDone(item, task, repeats);
+      return done || isArrangementPending(item, task, repeats)
+        ? [{ ...item, task, done }]
+        : [];
     }),
-);
-const arrangements = computed(() =>
-  todayRecords.value.flatMap((item) => {
-    const repeats = Boolean(store.recurrences.get(item.taskId));
-    const done = isArrangementDone(item, item.task, repeats);
-    return done || isArrangementPending(item, item.task, repeats)
-      ? [{ ...item, done }]
-      : [];
-  }),
 );
 const pending = computed(() => arrangements.value.filter((item) => !item.done));
 const dueToday = computed(() => unscheduledTasksDue(store.state, date.value));
@@ -355,14 +351,17 @@ const upcomingRepeatDays = computed(() => {
     }),
   );
 });
-const completed = computed(() =>
-  todayRecords.value.filter((item) => item.done),
+const completedRepeats = computed(() =>
+  arrangements.value.filter(
+    (item) =>
+      item.done && (item.recurrence || store.recurrences.get(item.taskId)),
+  ),
 );
 const completedTodayIds = computed(
-  () => new Set(completed.value.map((item) => item.taskId)),
+  () => new Set(completedRepeats.value.map((item) => item.taskId)),
 );
-const visibleCompletedStages = computed(() =>
-  completed.value.filter((item) =>
+const visibleCompletedRepeats = computed(() =>
+  completedRepeats.value.filter((item) =>
     (item.recurrence?.title ?? item.task?.title ?? "").includes(search.value),
   ),
 );
@@ -423,7 +422,7 @@ const pickedOrdinary = computed(() =>
 const undoableRemovals = computed(() => {
   const batch = lastRemoval.value;
   if (!batch || batch.date !== date.value) return [];
-  return (store.state.skippedOccurrences ?? []).filter(
+  return store.state.skippedOccurrences.filter(
     ({ arrangement }) =>
       arrangement.date === batch.date && batch.taskIds.has(arrangement.taskId),
   );
@@ -1140,7 +1139,7 @@ async function energy(event: Event) {
                 >
                 <small
                   v-else-if="view === 'all' && completedTodayIds.has(task.id)"
-                  >今日阶段已完成</small
+                  >今日已完成</small
                 >
                 <small
                   v-else-if="view === 'all' && store.recurrences.get(task.id)"
@@ -1186,21 +1185,20 @@ async function energy(event: Event) {
             v-if="
               view === 'completed' &&
               !selecting &&
-              visibleCompletedStages.length
+              visibleCompletedRepeats.length
             "
             class="today-completed"
-            aria-label="已完成的今日阶段"
+            aria-label="今日已完成的重复任务"
           >
             <div class="list-heading">
-              <span>已完成的今日阶段</span
-              ><span>{{ visibleCompletedStages.length }} 项</span>
+              <span>今日已完成的重复任务</span
+              ><span>{{ visibleCompletedRepeats.length }} 项</span>
             </div>
             <TaskCard
-              v-for="item in visibleCompletedStages"
+              v-for="item in visibleCompletedRepeats"
               :key="item.taskId"
               :task="item.task"
               :arrangement="item"
-              stage-record
               @edit="edit"
               @occurrence="openOccurrence"
             />
@@ -1208,7 +1206,7 @@ async function energy(event: Event) {
           <p
             v-if="
               !visibleTasks.length &&
-              (view === 'all' || !visibleCompletedStages.length)
+              (view === 'all' || !visibleCompletedRepeats.length)
             "
             class="empty-state"
           >

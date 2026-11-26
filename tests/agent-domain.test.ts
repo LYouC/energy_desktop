@@ -1,4 +1,3 @@
-import { migrateWorkspaceProposals } from "../src/persistence/migrations";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyState, newTask, stateSchema } from "../src/domain/model";
@@ -223,7 +222,7 @@ test("A20 今日优化同时看到已安排和待安排任务，部分推进整�
   );
 });
 
-test("Agent动作与草稿拒绝旧字段，历史拆分读取时保留旧目标内容", () => {
+test("Agent 动作与草稿拒绝未知字段", () => {
   for (const field of [
     "goal",
     "deadline",
@@ -263,44 +262,6 @@ test("Agent动作与草稿拒绝旧字段，历史拆分读取时保留旧目标
       .success,
     false,
   );
-  const state = fixture();
-  const restored = migrateWorkspaceProposals(
-    JSON.stringify({
-      ...state,
-      proposals: [
-        {
-          id: "legacy",
-          sessionId: state.activeSessionId,
-          createdAt: new Date().toISOString(),
-          changes: [
-            {
-              id: "split",
-              taskId: state.tasks[0].id,
-              taskVersion: state.tasks[0].version,
-              type: "split",
-              label: "旧拆分",
-              reason: "历史",
-              date: "",
-              scope: "",
-              status: "pending",
-              children: [{ title: "朗读", goal: "读一页" }],
-            },
-          ],
-        },
-      ],
-    }),
-  );
-  assert.equal(
-    restored.proposals[0].cards[0].changes[0].children[0].description,
-    "读一页",
-  );
-  const accepted = applyCommand(restored, {
-    type: "resolve",
-    proposalId: "legacy",
-    cardIds: ["split"],
-    accept: true,
-  });
-  assert.equal(accepted.tasks[1].description, "读一页");
 });
 
 test("直接采用相同拆分会接受原方案且重试不重复子任务", () => {
@@ -857,69 +818,6 @@ test("不能跨会话接受方案，接受重试只生效一次", () => {
   state = applyAgentTurn(state, proposal.sessionId, "接受这项", turn);
   state = applyAgentTurn(state, proposal.sessionId, "接受这项", turn);
   assert.equal(state.tasks.length, 2);
-});
-test("旧阶段方案继续整卡应用，拒绝不改业务数据", () => {
-  let state = fixture();
-  state = applyCommand(state, {
-    type: "schedule",
-    taskId: state.tasks[0].id,
-    date: "2026-11-16",
-    scope: "读一页",
-  });
-  state = applyCommand(state, {
-    type: "proposal",
-    proposal: {
-      id: "legacy-stage",
-      sessionId: state.activeSessionId,
-      createdAt: new Date().toISOString(),
-      cards: [
-        {
-          id: "legacy-stage-card",
-          taskId: state.tasks[0].id,
-          title: state.tasks[0].title,
-          reason: "保留旧方案",
-          status: "pending",
-          changes: [
-            {
-              id: "legacy-update",
-              taskId: state.tasks[0].id,
-              taskVersion: state.tasks[0].version,
-              label: "暂停任务",
-              type: "update",
-              date: "",
-              scope: "",
-              children: [],
-              patch: { status: "waiting" },
-            },
-            {
-              id: "legacy-stage-change",
-              taskId: state.tasks[0].id,
-              taskVersion: state.tasks[0].version,
-              label: "完成旧阶段",
-              type: "stage",
-              date: "2026-11-16",
-              scope: "读一页",
-              children: [],
-              done: true,
-            },
-          ],
-        },
-      ],
-    },
-  });
-  const [p] = state.proposals;
-  const command = {
-    type: "resolve" as const,
-    proposalId: p.id,
-    cardIds: [p.cards[0].id],
-  };
-  const rejected = applyCommand(state, { ...command, accept: false });
-  assert.deepEqual(rejected.tasks, state.tasks);
-  assert.deepEqual(rejected.arrangements, state.arrangements);
-  assert.equal(rejected.proposals[0].cards[0].status, "rejected");
-  const accepted = applyCommand(state, { ...command, accept: true });
-  assert.equal(accepted.tasks[0].status, "waiting");
-  assert.equal(accepted.arrangements[0].done, true);
 });
 function invoiceAdjustmentFixture(db: WorkspaceDatabase, today: string) {
   const tomorrow = "2026-11-21";

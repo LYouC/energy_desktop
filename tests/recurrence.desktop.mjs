@@ -173,10 +173,10 @@ try {
     restoredDialog.getByRole("button", { name: "查看重复设置" }),
   ).toHaveCount(0);
   await restoredDialog.getByRole("button", { name: "关闭" }).click();
-  await restored.getByRole("button", { name: /完成(?:今日阶段|本次)/ }).click();
+  await restored.getByRole("button", { name: "完成本次安排" }).click();
   await page.getByRole("button", { name: "已完成", exact: true }).click();
   await expect(
-    page.getByRole("region", { name: "已完成的今日阶段" }),
+    page.getByRole("region", { name: "今日已完成的重复任务" }),
   ).toContainText("练英语");
 
   await page.getByRole("button", { name: /今日安排/ }).click();
@@ -331,7 +331,7 @@ try {
   await page.getByRole("button", { name: /今日安排/ }).click();
   const childList = page.getByRole("list", { name: "整理纪要的子任务" });
   const childCheck = childList.getByRole("button", {
-    name: "完成子任务今日阶段：检查行动项",
+    name: "完成子任务本次安排：检查行动项",
   });
   await expect(
     page.getByRole("button", { name: "检查行动项", exact: true }),
@@ -347,38 +347,38 @@ try {
   await page.keyboard.press("Escape");
   await childCheck.press("Space");
   await expect(
-    childList.getByRole("button", { name: "恢复子任务今日阶段：检查行动项" }),
+    childList.getByRole("button", { name: "恢复子任务本次安排：检查行动项" }),
   ).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await childList
-    .getByRole("button", { name: "恢复子任务今日阶段：检查行动项" })
+    .getByRole("button", { name: "恢复子任务本次安排：检查行动项" })
     .click();
   await expect(childCheck).toBeVisible();
   const parentCard = page.locator(".task-card.focused");
   await parentCard
-    .getByRole("button", { name: "完成今日阶段", exact: true })
+    .getByRole("button", { name: "完成本次安排", exact: true })
     .click();
   await page.locator(".today-completed > summary").click();
   await expect(childList).toBeHidden();
   await page.getByText("展开子任务（1）", { exact: true }).click();
   await expect(childList).toBeVisible();
   await childList
-    .getByRole("button", { name: "恢复子任务今日阶段：检查行动项" })
+    .getByRole("button", { name: "恢复子任务本次安排：检查行动项" })
     .click();
   await expect(
-    parentCard.getByRole("button", { name: "恢复今日阶段", exact: true }),
+    parentCard.getByRole("button", { name: "恢复本次安排", exact: true }),
   ).toBeVisible();
   await childCheck.click();
   await page.getByRole("button", { name: /所有任务/ }).click();
-  await expect(childRow).toContainText("今日阶段已完成");
+  await expect(childRow).toContainText("今日已完成");
   await page.getByRole("button", { name: "已完成", exact: true }).click();
   const completedStages = page.getByRole("region", {
-    name: "已完成的今日阶段",
+    name: "今日已完成的重复任务",
   });
   await completedStages
     .locator("article")
     .filter({ hasText: "检查行动项" })
-    .getByRole("button", { name: "恢复今日阶段" })
+    .getByRole("button", { name: "恢复本次安排" })
     .click();
   await expect(completedStages).not.toContainText("检查行动项");
   await page.getByRole("button", { name: /今日安排/ }).click();

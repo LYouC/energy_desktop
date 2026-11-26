@@ -7,6 +7,7 @@ import {
 } from "../domain/model";
 import { effectiveRecurrences } from "../domain/recurrence";
 import {
+  isArrangementDone,
   isTaskOpen,
   schedulableTodayTasks,
   unscheduledTasksDue,
@@ -18,8 +19,8 @@ export function upcomingTasks(state: State, today: string, through: string) {
     string,
     Pick<Arrangement, "date" | "scope">[]
   >();
-  for (const { taskId, date, scope, done, recurrence } of state.arrangements) {
-    if (done || recurrence || !inWindow(date)) continue;
+  for (const { taskId, date, scope, recurrence } of state.arrangements) {
+    if (recurrence || !inWindow(date)) continue;
     const entries = arrangementsByTask.get(taskId) ?? [];
     entries.push({ date, scope });
     arrangementsByTask.set(taskId, entries);
@@ -61,9 +62,7 @@ export function upcomingTasks(state: State, today: string, through: string) {
 }
 
 export function arrangementForAgent(item: Arrangement, task?: Task) {
-  return !item.recurrence && !task?.recurrence && task?.status === "done"
-    ? { ...item, taskDone: true }
-    : item;
+  return { ...item, done: isArrangementDone(item, task) };
 }
 
 export function tasksForAgent(
@@ -120,14 +119,13 @@ export function buildContext(state: State, sessionId: string, date?: string) {
         (item) =>
           item.date === date &&
           taskIds.has(item.taskId) &&
-          (item.done ||
-            item.recurrence ||
+          (item.recurrence ||
             tasksById.get(item.taskId)?.recurrence ||
             tasksById.get(item.taskId)?.status !== "abandoned"),
       )
       .map((item) => arrangementForAgent(item, tasksById.get(item.taskId))),
     dueToday: unscheduledTasksDue(state, date),
-    skippedToday: (state.skippedOccurrences ?? [])
+    skippedToday: state.skippedOccurrences
       .map(({ arrangement }) => arrangement)
       .filter((item) => item.date === date && taskIds.has(item.taskId)),
     unfinishedTasks: active.map((task) => ({

@@ -22,7 +22,7 @@
 
 验证命令、覆盖范围及最近结果见 [测试说明](tests/README.md)，开发协作及提交规范见 [AGENTS.md](AGENTS.md)。
 
-任务、会话和工作区偏好保存在 Electron userData 的 `workspace.db`。设置 `XIXU_DATA_DIR` 可指定独立的工作区数据目录。模型设置单独保存，见 [Agent 配置说明](src/agent/README.md#配置与验证)。
+任务、会话和工作区偏好保存在 Electron userData 的 `workspace.db`。设置 `XIXU_DATA_DIR` 可指定独立的工作区数据目录。工作区格式变化后，按 [工作区重置说明](src/persistence/README.md#开发期工作区格式) 创建新库。模型设置单独保存，见 [Agent 配置说明](src/agent/README.md#配置与验证)。
 
 ## Windows 安装包
 

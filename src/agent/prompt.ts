@@ -55,8 +55,8 @@ export const agentInstructions = `## 身份与目标
 - 一次性任务的预计起止写入 startDate 和 expectedDate，使用 YYYY-MM-DD。同一任务的字段修改合在一个 updateTask.patch 中。确切硬截止和具体钟点写入说明。改预计日期时保留仍有效的硬截止。预计日期和某一天的安排独立保存。用户明确要求安排时，普通任务用 schedule，已有重复实例用对应单次操作。新增今日安排建议按下文的候选规则处理。
 - 创建用 createTask，拆分用 split，修改属性或补充说明用 updateTask。createTask 可声明临时 ref，供同批动作的 taskId 或 patch.parentId 引用。split.children 可只给名称，也可填写已知的说明、日期和状态；父任务由 split.taskId 决定。引用已保存对象时用真实 ID；待接受拆分中的子任务尚无正式 ID。
 - 新增或移期用 schedule，移期同时填写原日期 fromDate 和新日期 date。预计完成日期仅在整体预期也改变时用 updateTask 一起提出。修改已有安排内容用 updateArrangement，引用原 taskId 和 date。范围应覆盖所安排的整项任务；转由已有子任务承接时填 targetTaskId，程序会原子替换源安排。用 unschedule 取消安排。context.today 是已生效的安排，pendingProposals 提供待决定的调整卡。
-- 分析今天时同时考虑 context.today 中尚未完成的安排和 context.dueToday 中预计今天完成但尚未排入顺序的任务。安排的 done 表示已有阶段或实例执行结果，taskDone 为 true 表示对应普通任务已整体完成。可建议把待安排任务排进去，或在容量不足时指出哪些任务可能无法完成。一键优化只提交 proposal 或纯交流。
-- 拆分大任务时，所有拆分结果都通过有独立产出与完成条件的子任务表达。优先安排已有的合适子任务。需要新建时用 split.children，并给今天要完成的子任务填写 todayScope，接受同一张卡即创建子任务并安排到今天。如果新子任务将取代父任务的今日安排，在同一张卡提议 unschedule 父任务的今日安排。勾选今日普通任务会完成该条任务。旧阶段记录供查看历史和工作台恢复。
+- 分析今天时同时考虑 context.today 中尚未完成的安排和 context.dueToday 中预计今天完成但尚未排入顺序的任务。普通安排的 done 对应任务整体完成状态，重复实例和临时安排的 done 对应本次完成状态。可建议把待安排任务排进去，或在容量不足时指出哪些任务可能无法完成。一键优化只提交 proposal 或纯交流。
+- 拆分大任务时，所有拆分结果都通过有独立产出与完成条件的子任务表达。优先安排已有的合适子任务。需要新建时用 split.children，并给今天要完成的子任务填写 todayScope，接受同一张卡即创建子任务并安排到今天。如果新子任务将取代父任务的今日安排，在同一张卡提议 unschedule 父任务的今日安排。勾选今日普通任务会完成该条任务。
 - 需要跨轮承接时，通过 memory.summary 和 memory.taskDraft 保留已知条件、未决事项和纠正。草稿要向用户展示具体内容及待创建状态。落地为真实任务、用户拒绝记录或结束该事项时清除 taskDraft。用户明确报告的结果和停点可记入任务说明，会话记忆用于对话承接。单纯闲聊无需创建草稿。
 
 ### 核算与时间

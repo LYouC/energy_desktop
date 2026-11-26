@@ -17,7 +17,7 @@ import {
 import {
   applyCommand,
   checkRecurringTaskPatch,
-  pendingStageDescendants,
+  pendingOccurrenceDescendants,
 } from "../domain/operations";
 import {
   effectiveRecurrences,
@@ -55,7 +55,7 @@ const occurrenceTarget = {
 const recurrence = recurrenceRuleSchema.describe(
   "daily 为每天，weekly 的 weekdays 使用 0=周日、1=周一至 6=周六，range 的 start/end 是含首尾的 YYYY-MM-DD。",
 );
-// 拒绝旧字段并交给同一工具循环修正，避免将已移除的内容静默丢弃。
+// 未知字段由工具显式报错，供模型在本轮修正。
 const agentTaskPatchSchema = taskPatchSchema
   .strict()
   .describe(
@@ -423,7 +423,7 @@ export function applyAgentTurn(
       action.done &&
       action.date === date
     )
-      descendantIds = pendingStageDescendants(state, sourceId, date).map(
+      descendantIds = pendingOccurrenceDescendants(state, sourceId, date).map(
         (item) => item.taskId,
       );
     const label =
@@ -458,7 +458,7 @@ export function applyAgentTurn(
         ? { fromDate: action.fromDate }
         : {}),
       ...(action.type === "schedule" && !action.fromDate && action.date === date
-        ? { todayOnly: true as const }
+        ? { newArrangementOnly: true as const }
         : {}),
       ...("done" in action ? { done: action.done } : {}),
       ...(action.type === "updateRecurrence"

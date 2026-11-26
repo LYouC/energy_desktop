@@ -20,7 +20,7 @@
 | `src/desktop/` | Electron 窗口、进程生命周期、IPC 和依赖装配。入口为 `main.ts` 和 `preload.ts`。 | [桌面宿主](src/desktop/README.md) |
 | `src/agent/` | AI SDK 工具循环、提示词、模型配置、上下文、容量计算和整轮动作应用。入口为 `runtime.ts` 和 `turn.ts`。 | [Agent](src/agent/README.md) |
 | `src/domain/` | 任务、安排、方案、会话、能量和偏好的结构与操作规则。入口为 `model.ts` 和 `operations.ts`，重复日期结算在 `recurrence.ts`。 | [业务模型与操作](src/domain/README.md) |
-| `src/persistence/` | SQLite 事务、并发版本、工作区保存与数据迁移。入口为 `storage.ts`。 | [SQLite 持久化](src/persistence/README.md) |
+| `src/persistence/` | SQLite 工作区、事务与并发版本。入口为 `storage.ts`。 | [SQLite 持久化](src/persistence/README.md) |
 
 ## 约束
 
@@ -28,7 +28,7 @@
 - 左侧是导航。“所有任务”在主工作区显示简洁列表，与详细“今日安排”切换；不在左侧列任务。不引入外部 Todo、收集箱或“接下来”。任务图留待未来。
 - 能量采用离散状态。手动改状态只更新数据；用户主动发送消息后才分析。AI 主动提出的计划修改先协商，用户已明确授权的操作不重复确认。
 - 正式应用必须支持浅色、深色主题切换；遵守设计规范，不用整页反色替代主题设计。
-- 保持代码简洁、整齐、规范。
+- 保持代码简洁、整齐、规范。开发阶段只支持当前数据格式与接口。工作区结构变化时升级格式版本，按模块说明新建开发工作区。 [SQLite 持久化](src/persistence/README.md)
 - 用户关注需求与结果，授予日常设计和实现自主权。按文档中可逆默认值继续推进；遇到影响范围、核心交互或授权规则的真实歧义，直接提出具体问题，先弄清楚再实现，不能擅自改目标。
 - 不提交 Key、用户数据库、私人会话或构建产物。按变更验证关键行为。
 

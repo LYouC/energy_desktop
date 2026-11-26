@@ -28,6 +28,7 @@ try {
         parentId: null,
         startDate: "",
         expectedDate: now.toLocaleDateString("sv-SE"),
+        importance: null,
         updatedAt: now.toISOString(),
         version: 0,
       },
@@ -79,7 +80,7 @@ try {
       ["blog", "写博客", "写完开头和文章提纲", false],
       ["read", "整理资料", "挑出三份值得保留的资料", false],
       ["email", "回复邮件", "确认下周会议时间", false],
-      ["legacy", "已归档旧任务", "保留的阶段记录", true],
+      ["archived", "已完成的归档任务", "保留的安排范围", true],
     ]) {
       await apply({
         type: "saveTask",
@@ -90,15 +91,15 @@ try {
           status: "doing",
           parentId: null,
           startDate: "",
-          expectedDate: id === "legacy" ? date : "",
+          expectedDate: id === "archived" ? date : "",
+          importance: null,
           updatedAt: now.toISOString(),
           version: 0,
         },
       });
       await apply({ type: "schedule", taskId: id, date, scope });
-      if (done) await apply({ type: "stage", taskId: id, date, done });
+      if (done) await apply({ type: "setTaskDone", taskId: id, done });
     }
-    await apply({ type: "setTaskDone", taskId: "legacy", done: true });
     const task = state.tasks.find(({ id }) => id === "blog");
     await apply({
       type: "saveTask",
@@ -228,16 +229,13 @@ try {
   if (!(await completed.getByText("洗衣服", { exact: true }).isVisible()))
     await completedSummary.click();
   const laundry = completed.locator("article").filter({ hasText: "洗衣服" });
-  await expect(laundry).toContainText("整体任务：进行中");
-  await laundry.getByRole("button", { name: "恢复今日阶段" }).click();
+  await expect(laundry).toContainText("整体完成");
+  await laundry.getByRole("button", { name: "恢复任务" }).click();
   await expect(focus).toContainText("洗衣服");
   await expect(page.locator(".today-finished")).toHaveCount(0);
   await page.getByRole("button", { name: "已完成", exact: true }).click();
-  const oldRecord = page.getByRole("region", { name: "已完成的今日阶段" });
-  await oldRecord.getByRole("button", { name: "恢复今日阶段" }).click();
-  await expect(oldRecord).toHaveCount(0);
   await expect(
-    page.locator(".task-list-row").filter({ hasText: "已归档旧任务" }),
+    page.locator(".task-list-row").filter({ hasText: "已完成的归档任务" }),
   ).toContainText("整体完成");
   expect(errors).toEqual([]);
   console.log(

@@ -39,7 +39,6 @@ const props = defineProps<{
   nextTaskId?: string;
   selectable?: boolean;
   selected?: boolean;
-  stageRecord?: boolean;
   subtasks?: { item: Arrangement & { task?: Task }; depth: number }[];
 }>();
 const emit = defineEmits<{
@@ -80,7 +79,7 @@ const childRows = computed(() => {
       .map((item) => item.taskId),
   ]);
   const skippedIds = new Set<string>();
-  for (const { arrangement } of store.state.skippedOccurrences ?? [])
+  for (const { arrangement } of store.state.skippedOccurrences)
     if (arrangement.date === date) skippedIds.add(arrangement.taskId);
   type Child = { taskId: string; title: string } & (
     | { item: Arrangement & { task?: Task }; task?: never }
@@ -125,7 +124,7 @@ const childMoves = computed(() => {
   const siblings = new Map<string | null | undefined, string[]>();
   for (const { item } of children.value) {
     if (item.done) continue;
-    const parent = item.recurrence?.ancestorIds
+    const parent = item.recurrence
       ? item.recurrence.ancestorIds[0]
       : item.task?.parentId;
     const ids = siblings.get(parent) ?? [];
@@ -162,29 +161,17 @@ function openDetails(item: Arrangement, task?: Task) {
     emit("occurrence", item);
   else if (task) emit("edit", task);
 }
-function completesTask(item: Arrangement, task?: Task) {
-  return (
-    !props.stageRecord &&
-    !item.recurrence &&
-    !store.recurrences.get(item.taskId) &&
-    (!item.done || task?.status === "done")
-  );
-}
-async function toggleCompletion(
-  item: Arrangement,
-  task: Task | undefined,
-  keyboard: boolean,
-) {
+async function toggleCompletion(item: Arrangement, keyboard: boolean) {
   try {
     await store.dispatch(
-      completesTask(item, task)
-        ? { type: "setTaskDone", taskId: item.taskId, done: !item.done }
-        : {
-            type: "stage",
+      arrangementKind(item)
+        ? {
+            type: "setOccurrenceDone",
             taskId: item.taskId,
             date: item.date,
             done: !item.done,
-          },
+          }
+        : { type: "setTaskDone", taskId: item.taskId, done: !item.done },
     );
     if (keyboard) emit("focusStage", item.taskId);
   } catch {}
@@ -245,19 +232,19 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
     <div class="task-head">
       <button
         class="check"
-        :aria-label="`${arrangement.done ? '恢复' : '完成'}${completesTask(arrangement, task) ? '任务' : '今日阶段'}`"
+        :aria-label="`${arrangement.done ? '恢复' : '完成'}${kindLabel ? '本次安排' : '任务'}`"
         :aria-pressed="arrangement.done"
         :title="
           arrangement.done
             ? undefined
-            : completesTask(arrangement, task)
+            : !kindLabel
               ? '同时完成各层未完成的一次性子任务'
               : hasPendingChildren
                 ? '同时完成今天已安排的子任务'
                 : undefined
         "
         :data-stage-task-id="arrangement.taskId"
-        @click="toggleCompletion(arrangement, task, $event.detail === 0)"
+        @click="toggleCompletion(arrangement, $event.detail === 0)"
       >
         <SquareCheck v-if="arrangement.done" :size="17" /><Square
           v-else
@@ -330,16 +317,10 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
             <button
               type="button"
               class="check child-check"
-              :aria-label="`${child.item.done ? '恢复' : '完成'}子任务${completesTask(child.item, child.item.task) ? '' : '今日阶段'}：${child.title}`"
+              :aria-label="`${child.item.done ? '恢复' : '完成'}子任务${arrangementKind(child.item) ? '本次安排' : ''}：${child.title}`"
               :aria-pressed="child.item.done"
               :data-stage-task-id="child.item.taskId"
-              @click="
-                toggleCompletion(
-                  child.item,
-                  child.item.task,
-                  $event.detail === 0,
-                )
-              "
+              @click="toggleCompletion(child.item, $event.detail === 0)"
             >
               <SquareCheck v-if="child.item.done" :size="17" /><Square
                 v-else
@@ -366,12 +347,11 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
               }}</small>
             </div>
             <small>{{
-              child.item.task?.status === "done" &&
-              completesTask(child.item, child.item.task)
-                ? statusLabels.done
-                : child.item.done
-                  ? "今日阶段已完成"
-                  : "今日待推进"
+              child.item.done
+                ? arrangementKind(child.item)
+                  ? "今日已完成"
+                  : statusLabels.done
+                : "今日待推进"
             }}</small>
             <DropdownMenuRoot
               v-if="!child.item.done || !child.item.recurrence"

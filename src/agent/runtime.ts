@@ -319,7 +319,7 @@ export async function generateAgentTurn(options: {
                   (!options.suggestOnly && !item.recurrence)),
             )
             .map(withTaskTitle),
-          skippedToday: (next.skippedOccurrences ?? [])
+          skippedToday: next.skippedOccurrences
             .filter(
               ({ arrangement }) =>
                 arrangement.date === context.date &&

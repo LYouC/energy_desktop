@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -289,157 +289,6 @@ test("同任务方案整卡接受及无效接受范围", () => {
   assert.equal(state.tasks.length, 2);
 });
 
-test("v4 旧方案保留历史状态和同任务待定项的独立确认范围", () => {
-  const state = taskState();
-  const {
-    cards: [card],
-    ...proposal
-  } = proposalFor(state);
-  const oldChange = { ...card.changes[0], reason: "旧方案理由" };
-  const payload = {
-    ...state,
-    proposals: [
-      {
-        ...proposal,
-        changes: [
-          { ...oldChange, id: "history", status: "accepted" },
-          { ...oldChange, id: "schedule", status: "pending" },
-          {
-            ...oldChange,
-            id: "update",
-            type: "update",
-            status: "pending",
-            patch: { description: "继续补充" },
-          },
-        ],
-      },
-    ],
-  };
-  const filename = path.join(
-    mkdtempSync(path.join(tmpdir(), "xixu-proposal-v4-")),
-    "workspace.db",
-  );
-  const raw = new DatabaseSync(filename);
-  raw.exec(
-    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=4;",
-  );
-  raw
-    .prepare("INSERT INTO workspace VALUES (1, ?, ?)")
-    .run(state.revision, JSON.stringify(payload));
-  raw.close();
-  const db = new WorkspaceDatabase(filename);
-  const migrated = db.load();
-  assert.deepEqual(
-    migrated.proposals[0].cards.map(({ id, status }) => [id, status]),
-    [
-      ["history", "accepted"],
-      ["schedule", "pending"],
-      ["update", "pending"],
-    ],
-  );
-  assert.equal(migrated.proposals[0].cards[0].reason, oldChange.reason);
-  const resolve = {
-    type: "resolve" as const,
-    proposalId: proposal.id,
-    accept: true,
-  };
-  const scheduled = db.execute(migrated.revision, {
-    ...resolve,
-    cardIds: ["schedule"],
-  });
-  assert.equal(scheduled.tasks[0].description, "");
-  assert.equal(scheduled.proposals[0].cards[2].status, "pending");
-  db.close();
-  const reopened = new WorkspaceDatabase(filename);
-  try {
-    assert.deepEqual(reopened.load(), scheduled);
-    const updated = reopened.execute(scheduled.revision, {
-      ...resolve,
-      cardIds: ["update"],
-    });
-    assert.equal(updated.tasks[0].description, "继续补充");
-    assert.equal(updated.arrangements.length, 1);
-  } finally {
-    reopened.close();
-  }
-});
-
-test("v5 旧提前推进方案失效，历史阶段与临时安排保留", () => {
-  const today = "2026-11-16";
-  let state = taskState();
-  state = applyCommand(
-    state,
-    {
-      type: "saveTask",
-      task: {
-        ...newTask(),
-        title: "每周整理",
-        recurrence: {
-          type: "range",
-          start: "2026-11-17",
-          end: "2026-11-18",
-        },
-      },
-    },
-    today,
-  );
-  state = applyCommand(state, {
-    type: "schedule",
-    taskId: state.tasks[0].id,
-    date: "2026-11-15",
-    scope: "已经完成的旧阶段",
-  });
-  state = applyCommand(state, {
-    type: "stage",
-    taskId: state.tasks[0].id,
-    date: "2026-11-15",
-    done: true,
-  });
-  state = applyCommand(state, {
-    type: "schedule",
-    taskId: state.tasks[1].id,
-    date: today,
-    scope: "保留下来的临时范围",
-  });
-  const proposal = proposalFor(state);
-  proposal.cards[0].changes[0] = {
-    ...proposal.cards[0].changes[0],
-    date: today,
-    todayOnly: true,
-  };
-  state = applyCommand(state, { type: "proposal", proposal });
-  const filename = path.join(
-    mkdtempSync(path.join(tmpdir(), "xixu-proposal-v5-")),
-    "workspace.db",
-  );
-  const raw = new DatabaseSync(filename);
-  raw.exec(
-    "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER, payload TEXT); PRAGMA user_version=5;",
-  );
-  raw
-    .prepare("INSERT INTO workspace VALUES (1, ?, ?)")
-    .run(state.revision, JSON.stringify(state));
-  raw.close();
-
-  const db = new WorkspaceDatabase(filename, () => today);
-  try {
-    const migrated = db.load();
-    assert.equal(migrated.proposals[0].cards[0].status, "failed");
-    assert.match(migrated.proposals[0].cards[0].failureReason ?? "", /已移除/);
-    assert.equal(migrated.proposals[0].cards[0].reason, "测试");
-    assert.deepEqual(migrated.arrangements, state.arrangements);
-    const resolved = db.execute(migrated.revision, {
-      type: "resolve",
-      proposalId: proposal.id,
-      cardIds: [proposal.cards[0].id],
-      accept: true,
-    });
-    assert.deepEqual(resolved, migrated);
-  } finally {
-    db.close();
-  }
-});
-
 test("回复与方案原子保存，失败不会留下孤立回复", () => {
   const state = taskState();
   const proposal = proposalFor(state);
@@ -542,18 +391,36 @@ test("磁盘重开、多个连接版本冲突与失败事务回滚", () => {
   }
 });
 
-test("拒绝未来数据库版本，保留原数据", () => {
+test("拒绝非当前版本的数据库，原始工作区不被改写", () => {
   const filename = path.join(
     mkdtempSync(path.join(tmpdir(), "xixu-version-test-")),
     "workspace.db",
   );
-  const db = new DatabaseSync(filename);
-  db.exec("PRAGMA user_version=8");
-  db.close();
-  assert.throws(() => new WorkspaceDatabase(filename), /更新版本/);
-  const inspect = new DatabaseSync(filename);
-  assert.equal(inspect.prepare("PRAGMA user_version").get()?.user_version, 8);
-  inspect.close();
+  const raw = new DatabaseSync(filename);
+  raw.exec("CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT)");
+  const payload = JSON.stringify({ tasks: [{ title: "已有任务" }] });
+  raw.prepare("INSERT INTO workspace VALUES (1, ?)").run(payload);
+  for (const version of [0, 7, 9]) {
+    raw.exec(`PRAGMA user_version=${version}`);
+    assert.throws(
+      () => new WorkspaceDatabase(filename),
+      /工作区格式与当前版本不一致/,
+    );
+    assert.equal(
+      raw.prepare("PRAGMA user_version").get()?.user_version,
+      version,
+    );
+    assert.equal(
+      raw.prepare("SELECT payload FROM workspace").get()?.payload,
+      payload,
+    );
+  }
+  raw.close();
+  renameSync(filename, `${filename}.previous`);
+  const fresh = new WorkspaceDatabase(filename);
+  assert.equal(fresh.load().revision, 0);
+  assert.deepEqual(fresh.load().tasks, []);
+  fresh.close();
 });
 
 test("损坏的工作区打开失败，原始内容仍可检查", () => {

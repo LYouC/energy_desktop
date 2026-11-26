@@ -63,7 +63,7 @@ export const taskSchema = z.object({
     .string()
     .describe("该任务自身的预计完成日期，YYYY-MM-DD，未知用空字符串。"),
   status: z.enum(["todo", "doing", "waiting", "done", "abandoned"]),
-  importance: taskImportanceSchema.default(null),
+  importance: taskImportanceSchema,
   recurrence: recurrenceRuleSchema.optional(),
   parentId: z.string().nullable(),
   updatedAt: z.string(),
@@ -120,10 +120,10 @@ export const arrangementSchema = z.object({
   recurrence: z
     .object({
       title: taskSchema.shape.title,
-      ancestorIds: z.array(z.string()).optional(),
+      ancestorIds: z.array(z.string()),
+      version: z.number().int().nonnegative(),
     })
     .optional(),
-  occurrenceVersion: z.number().int().nonnegative().optional(),
 });
 export type Arrangement = z.infer<typeof arrangementSchema>;
 const changeStatus = z.enum(["pending", "accepted", "rejected"]);
@@ -137,7 +137,6 @@ const changeSchema = z.object({
     "split",
     "update",
     "unschedule",
-    "stage",
     "updateRecurrence",
     "deleteRecurringTask",
     "createOccurrence",
@@ -148,18 +147,10 @@ const changeSchema = z.object({
   ]),
   date: z.string(),
   scope: z.string(),
-  // 读取已经保存的旧拆分时，将 goal 归入说明。模型工具只暴露新字段。
-  children: z.array(
-    childTaskSchema
-      .extend({ goal: z.string().optional() })
-      .transform(({ goal, ...child }) => ({
-        ...child,
-        description: child.description || goal || "",
-      })),
-  ),
+  children: z.array(childTaskSchema.strict()),
   patch: taskPatchSchema.optional(),
   fromDate: z.string().optional(),
-  todayOnly: z.literal(true).optional(),
+  newArrangementOnly: z.literal(true).optional(),
   fromTaskId: z.string().optional(),
   fromTaskTitle: z.string().optional(),
   targetTaskTitle: z.string().optional(),
@@ -171,42 +162,22 @@ const changeSchema = z.object({
   descendantIds: z.array(z.string()).optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
-const adjustmentCardSchema = z
-  .object({
-    id: z.string(),
-    taskId: z.string(),
-    title: z.string(),
-    reason: z.string(),
-    status: changeStatus.or(z.literal("failed")),
-    failureReason: z.string().optional(),
-    // 兼容 v6 已保存的旧版单次推进方案。
-    invalidated: z.boolean().optional(),
-    previousExpectedDate: z.string().optional(),
-    changes: z.array(changeSchema).nonempty(),
-  })
-  .transform(({ invalidated, ...card }) =>
-    invalidated
-      ? {
-          ...card,
-          status: "failed" as const,
-          failureReason: "该方案使用了已移除的单次推进功能。",
-        }
-      : card,
-  );
-export type AdjustmentCard = z.infer<typeof adjustmentCardSchema>;
-const proposalHeader = z.object({
+const adjustmentCardSchema = z.strictObject({
   id: z.string(),
-  sessionId: z.string(),
-  createdAt: z.string(),
+  taskId: z.string(),
+  title: z.string(),
+  reason: z.string(),
+  status: changeStatus.or(z.literal("failed")),
+  failureReason: z.string().optional(),
+  previousExpectedDate: z.string().optional(),
+  changes: z.array(changeSchema).nonempty(),
 });
-export const legacyProposalSchema = proposalHeader.extend({
-  changes: z.array(
-    changeSchema.extend({ reason: z.string(), status: changeStatus }),
-  ),
-});
-export const proposalSchema = proposalHeader
-  .extend({
-    legacy: z.literal(true).optional(),
+export type AdjustmentCard = z.infer<typeof adjustmentCardSchema>;
+export const proposalSchema = z
+  .strictObject({
+    id: z.string(),
+    sessionId: z.string(),
+    createdAt: z.string(),
     cards: z
       .array(adjustmentCardSchema)
       .refine(
@@ -215,17 +186,14 @@ export const proposalSchema = proposalHeader
       ),
   })
   .refine(
-    ({ cards, legacy }) =>
+    ({ cards }) =>
       cards.every((card) =>
         card.changes.every(
           (change) =>
             change.taskId === card.taskId ||
             (change.type === "schedule" && change.fromTaskId === card.taskId),
         ),
-      ) &&
-      (legacy
-        ? cards.every((card) => card.changes.length === 1)
-        : new Set(cards.map((card) => card.taskId)).size === cards.length),
+      ) && new Set(cards.map((card) => card.taskId)).size === cards.length,
     { message: "调整卡必须按任务分组。" },
   );
 export type Proposal = z.infer<typeof proposalSchema>;
@@ -233,25 +201,23 @@ export const stateSchema = z.object({
   revision: z.number().int(),
   tasks: z.array(taskSchema),
   arrangements: z.array(arrangementSchema),
-  repeatCursors: z
-    .array(z.object({ taskId: z.string(), through: recurrenceDate }))
-    .optional(),
-  skippedOccurrences: z
-    .array(
-      z.object({
-        arrangement: arrangementSchema,
-        previousTaskIds: z.array(z.string()),
-        nextTaskIds: z.array(z.string()),
-      }),
-    )
-    .optional(),
+  repeatCursors: z.array(
+    z.object({ taskId: z.string(), through: recurrenceDate }),
+  ),
+  skippedOccurrences: z.array(
+    z.object({
+      arrangement: arrangementSchema,
+      previousTaskIds: z.array(z.string()),
+      nextTaskIds: z.array(z.string()),
+    }),
+  ),
   proposals: z.array(proposalSchema),
   sessions: z.array(
     z.object({
       id: z.string(),
       title: z.string(),
       draft: z.string(),
-      createdAt: z.string().optional(),
+      createdAt: z.string(),
       agentMemory: agentMemorySchema.optional(),
     }),
   ),
@@ -279,7 +245,7 @@ export type State = z.infer<typeof stateSchema>;
 export const commandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("saveTask"),
-    task: taskSchema.extend({ importance: taskImportanceSchema.optional() }),
+    task: taskSchema,
   }),
   z.object({ type: z.literal("deleteTask"), id: z.string() }),
   z.object({
@@ -304,9 +270,9 @@ export const commandSchema = z.discriminatedUnion("type", [
     date: z.string(),
   }),
   z.object({
-    type: z.literal("stage"),
+    type: z.literal("setOccurrenceDone"),
     taskId: z.string(),
-    date: z.string(),
+    date: recurrenceDate,
     done: z.boolean(),
   }),
   z.object({
@@ -416,6 +382,8 @@ export function emptyState(): State {
     revision: 0,
     tasks: [],
     arrangements: [],
+    repeatCursors: [],
+    skippedOccurrences: [],
     proposals: [],
     sessions: [session],
     activeSessionId: session.id,

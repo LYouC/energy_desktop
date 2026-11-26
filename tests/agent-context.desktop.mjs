@@ -116,6 +116,7 @@ try {
         expectedDate: now.toLocaleDateString("sv-SE"),
         status: "todo",
         parentId: null,
+        importance: null,
         updatedAt: now.toISOString(),
       },
     });
@@ -130,7 +131,7 @@ try {
       },
     });
     const finished = await window.desktop.execute(recurring.revision, {
-      type: "stage",
+      type: "setOccurrenceDone",
       taskId: "archived",
       date: now.toLocaleDateString("sv-SE"),
       done: true,

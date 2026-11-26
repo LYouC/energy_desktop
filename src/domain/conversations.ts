@@ -12,7 +12,7 @@ export function conversationHistory(state: State) {
     .reverse()
     .map((session) => ({
       session,
-      lastActivity: lastMessageAt.get(session.id) ?? session.createdAt ?? "",
+      lastActivity: lastMessageAt.get(session.id) ?? session.createdAt,
     }))
     .sort((left, right) => right.lastActivity.localeCompare(left.lastActivity));
 }

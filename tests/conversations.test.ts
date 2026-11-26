@@ -55,14 +55,15 @@ test("删除当前会话只清理会话数据，选中最近会话并在删空�
 
 test("历史使用最后一条消息时间排序，满额后淘汰最旧会话及其消息", () => {
   const state = emptyState();
+  const oldTimestamp = "2000-01-01T00:00:00.000Z";
+  const recentTimestamp = "2010-01-01T00:00:00.000Z";
   state.sessions = Array.from({ length: conversationLimit }, (_, index) => ({
     id: `old-${index}`,
     title: "旧会话",
     draft: "",
+    createdAt: oldTimestamp,
   }));
   state.activeSessionId = state.sessions[0].id;
-  const oldTimestamp = "2000-01-01T00:00:00.000Z";
-  const recentTimestamp = "2010-01-01T00:00:00.000Z";
   state.messages = [
     {
       id: "recent",

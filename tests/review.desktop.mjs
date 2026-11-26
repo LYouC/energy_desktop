@@ -33,6 +33,7 @@ try {
       startDate: "",
       expectedDate: "",
       status: "todo",
+      importance: null,
       updatedAt: new Date().toISOString(),
     });
     const apply = async (command) => {

@@ -395,8 +395,6 @@ function changeSummary(change: Change) {
   if (change.type === "split")
     return `拆分为 ${change.children.map((child) => (child.todayScope ? `${child.title}（安排到 ${change.date} · ${child.todayScope}）` : child.title)).join("、")}`;
   if (change.type === "unschedule") return `取消 ${change.date} 的安排`;
-  if (change.type === "stage")
-    return `${change.date} · ${change.done ? "完成今日阶段" : "恢复今日阶段"}${completionDetails(change)}`;
   return "";
 }
 function fieldSummaries(

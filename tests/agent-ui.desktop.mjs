@@ -130,6 +130,7 @@ try {
         expectedDate: "2026-11-20",
         status: "todo",
         parentId: null,
+        importance: null,
         updatedAt: now,
       },
     });

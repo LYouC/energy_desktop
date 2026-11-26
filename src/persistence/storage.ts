@@ -9,14 +9,8 @@ import {
 import { applyCommand } from "../domain/operations";
 import { synchronizeRecurrence } from "../domain/recurrence";
 import { applyAgentTurn } from "../agent/turn";
-import { conversationLimit, trimConversations } from "../domain/conversations";
-import {
-  migrateWorkspaceProposals,
-  migrateWorkspaceV1,
-  migrateWorkspaceV5,
-} from "./migrations";
 
-const workspaceVersion = 7;
+const workspaceVersion = 8;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
@@ -26,48 +20,32 @@ export class WorkspaceDatabase {
   ) {
     this.db = new DatabaseSync(filename);
     try {
-      this.db.exec("PRAGMA journal_mode=WAL");
       this.inTransaction(() => {
         const { user_version: version } = this.db
           .prepare("PRAGMA user_version")
           .get() as {
           user_version: number;
         };
-        if (version > workspaceVersion)
-          throw new Error("数据库来自更新版本，请使用相应版本的息序打开。");
+        if (version === workspaceVersion) return;
+        const existingWorkspace =
+          version === 0 &&
+          this.db
+            .prepare("SELECT 1 FROM sqlite_schema WHERE name = 'workspace'")
+            .get();
+        if (version !== 0 || existingWorkspace)
+          throw new Error(
+            "工作区格式与当前版本不一致。请关闭应用，移走 workspace.db 及同名的 -wal、-shm 文件（如存在），再启动以创建新工作区。",
+          );
         this.db.exec(
-          "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL);",
+          "CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK(id = 1), payload TEXT NOT NULL);",
         );
-        const row = this.db
-          .prepare("SELECT payload FROM workspace WHERE id=1")
-          .get() as { payload: string } | undefined;
-        if (row && version < 2) {
-          const migrated = migrateWorkspaceV1(row.payload);
-          this.writeSnapshot(migrated);
-        } else if (row && version < 5) {
-          this.writeSnapshot(migrateWorkspaceProposals(row.payload));
-        } else if (row && version === 5) {
-          this.writeSnapshot(migrateWorkspaceV5(row.payload));
-        } else if (row && version === 6) {
-          const migrated = stateSchema.parse(JSON.parse(row.payload));
-          migrated.revision++;
-          this.writeSnapshot(migrated);
-        }
+        this.db
+          .prepare("INSERT INTO workspace (id, payload) VALUES (1, ?)")
+          .run(JSON.stringify(emptyState()));
         this.db.exec(`PRAGMA user_version=${workspaceVersion}`);
       });
-      const initial = emptyState();
-      this.db
-        .prepare(
-          "INSERT OR IGNORE INTO workspace (id, revision, payload) VALUES (1, ?, ?)",
-        )
-        .run(initial.revision, JSON.stringify(initial));
-      const state = this.load();
-      if (state.sessions.length > conversationLimit)
-        this.transact(state.revision, (previous) => {
-          trimConversations(previous);
-          previous.revision++;
-          return previous;
-        });
+      this.db.exec("PRAGMA journal_mode=WAL");
+      this.load();
     } catch (error) {
       this.db.close();
       throw error;
@@ -139,8 +117,8 @@ export class WorkspaceDatabase {
   }
   private writeSnapshot(state: State) {
     this.db
-      .prepare("UPDATE workspace SET revision=?, payload=? WHERE id=1")
-      .run(state.revision, JSON.stringify(state));
+      .prepare("UPDATE workspace SET payload=? WHERE id=1")
+      .run(JSON.stringify(state));
   }
   private inTransaction<T>(action: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");

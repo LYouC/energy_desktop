@@ -46,13 +46,13 @@ export function taskProgressForDate(
   arrangement: Arrangement | undefined,
   repeats: boolean,
 ) {
-  if (!repeats && task.status === "done")
-    return { done: true, label: statusLabels.done };
-  if (arrangement)
+  if (arrangement && (arrangement.recurrence || repeats))
     return {
       done: arrangement.done,
-      label: arrangement.done ? "今日阶段已完成" : "今日待推进",
+      label: arrangement.done ? "今日已完成" : "今日待推进",
     };
   if (repeats) return { done: false, label: "今天未安排" };
+  if (arrangement && task.status !== "done")
+    return { done: false, label: "今日待推进" };
   return { done: task.status === "done", label: statusLabels[task.status] };
 }
