@@ -158,7 +158,8 @@ try {
   );
   expect(
     optimized.arrangements.some((item) => item.taskId === "archived"),
-  ).toBe(true);
+  ).toBe(false);
+  expect(optimized.repeatCompletions).toEqual([]);
   expect(optimized.proposals[0].cards[0]).toMatchObject({
     status: "pending",
     changes: [{ children: [{ title: "写提纲", todayScope: "列出三个要点" }] }],

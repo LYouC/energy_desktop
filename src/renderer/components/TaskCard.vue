@@ -8,6 +8,7 @@ import {
   Square,
   SquareCheck,
   CalendarDays,
+  CirclePause,
   Ellipsis,
   Repeat2,
 } from "lucide-vue-next";
@@ -22,10 +23,7 @@ import Button from "./ui/button/Button.vue";
 import { useWorkspace } from "@/stores/workspace";
 import { taskProgressForDate } from "../lib/recurrence";
 import { taskGroups, taskGroupRows } from "../lib/taskGroups";
-import {
-  arrangementAncestorIds,
-  taskAncestorIds,
-} from "../../domain/recurrence";
+import { taskAncestorIds } from "../../domain/recurrence";
 import { statusLabels, type Task, type Arrangement } from "../../domain/model";
 const props = defineProps<{
   task?: Task;
@@ -43,7 +41,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   edit: [task: Task];
-  occurrence: [item: Arrangement];
   focusTask: [id: string];
   moved: [taskId: string, targetTaskId: string];
   moveGroup: [taskId: string, targetTaskId: string];
@@ -55,7 +52,7 @@ const store = useWorkspace();
 const children = computed(() =>
   (props.subtasks ?? []).map(({ item }) => ({
     item,
-    title: item.recurrence?.title ?? item.task?.title ?? "",
+    title: item.task?.title ?? "",
   })),
 );
 const hasPendingChildren = computed(() =>
@@ -96,7 +93,7 @@ const childRows = computed(() => {
   }
   for (const { item, title } of children.value) {
     const bridge: Task[] = [];
-    for (const parentId of arrangementAncestorIds(tasks, item)) {
+    for (const parentId of taskAncestorIds(tasks, item.taskId)) {
       if (scheduledIds.has(parentId)) break;
       const parent = tasks.get(parentId);
       if (parent) bridge.push(parent);
@@ -108,15 +105,7 @@ const childRows = computed(() => {
     for (const task of tasks.values())
       if (task.parentId === rootId) addPreview(task);
   return taskGroupRows(
-    taskGroups(
-      [...entries.values()],
-      (child) => child.taskId,
-      tasks,
-      (child) =>
-        child.item
-          ? arrangementAncestorIds(tasks, child.item)
-          : taskAncestorIds(tasks, child.taskId),
-    ),
+    taskGroups([...entries.values()], (child) => child.taskId, tasks),
     1,
   );
 });
@@ -124,9 +113,7 @@ const childMoves = computed(() => {
   const siblings = new Map<string | null | undefined, string[]>();
   for (const { item } of children.value) {
     if (item.done) continue;
-    const parent = item.recurrence
-      ? item.recurrence.ancestorIds[0]
-      : item.task?.parentId;
+    const parent = item.task?.parentId;
     const ids = siblings.get(parent) ?? [];
     ids.push(item.taskId);
     siblings.set(parent, ids);
@@ -140,26 +127,14 @@ const childMoves = computed(() => {
     ),
   );
 });
-const title = computed(
-  () => props.arrangement.recurrence?.title ?? props.task?.title ?? "",
-);
+const title = computed(() => props.task?.title ?? "");
 function arrangementKind(item: Arrangement) {
-  return item.recurrence
-    ? "重复"
-    : store.recurrences.get(item.taskId)
-      ? "临时安排"
-      : "";
+  return item.recurrence ? "重复" : "";
 }
 const kindLabel = computed(() => arrangementKind(props.arrangement));
-const showScope = computed(
-  () =>
-    !props.arrangement.recurrence ||
-    props.arrangement.scope.trim() !== title.value.trim(),
-);
-function openDetails(item: Arrangement, task?: Task) {
-  if (item.recurrence || store.recurrences.get(item.taskId))
-    emit("occurrence", item);
-  else if (task) emit("edit", task);
+const showScope = computed(() => !props.arrangement.recurrence);
+function openDetails(task?: Task) {
+  if (task) emit("edit", task);
 }
 async function toggleCompletion(item: Arrangement, keyboard: boolean) {
   try {
@@ -230,7 +205,15 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
   >
     <div v-if="focus" class="eyebrow">当前聚焦</div>
     <div class="task-head">
+      <CirclePause
+        v-if="store.isRecurrenceStopped(arrangement.taskId)"
+        class="recurrence-stopped-icon"
+        :size="17"
+        role="img"
+        aria-label="已停止重复"
+      />
       <button
+        v-else
         class="check"
         :aria-label="`${arrangement.done ? '恢复' : '完成'}${kindLabel ? '本次安排' : '任务'}`"
         :aria-pressed="arrangement.done"
@@ -253,7 +236,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
       </button>
       <div class="task-info">
         <div class="task-title-line">
-          <button class="task-name" @click="openDetails(arrangement, task)">
+          <button class="task-name" @click="openDetails(task)">
             {{ title }}
           </button>
           <span v-if="kindLabel" class="recurrence-tag">
@@ -281,12 +264,8 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
       </div>
       <button
         class="icon-button"
-        :aria-label="
-          arrangement.recurrence || store.recurrences.get(arrangement.taskId)
-            ? '本次详情'
-            : '查看任务详情'
-        "
-        @click="openDetails(arrangement, task)"
+        aria-label="查看任务详情"
+        @click="openDetails(task)"
       >
         <ArrowUpRight :size="17" />
       </button>
@@ -314,7 +293,19 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
           :style="{ '--task-indent': `${Math.min(depth - 1, 3) * 12}px` }"
         >
           <template v-if="child.item">
+            <span
+              v-if="store.isRecurrenceStopped(child.item.taskId)"
+              class="child-check"
+            >
+              <CirclePause
+                class="recurrence-stopped-icon"
+                :size="17"
+                role="img"
+                aria-label="已停止重复"
+              />
+            </span>
             <button
+              v-else
               type="button"
               class="check child-check"
               :aria-label="`${child.item.done ? '恢复' : '完成'}子任务${arrangementKind(child.item) ? '本次安排' : ''}：${child.title}`"
@@ -332,7 +323,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
                 <button
                   class="task-child-name"
                   type="button"
-                  @click="openDetails(child.item, child.item.task)"
+                  @click="openDetails(child.item.task)"
                 >
                   {{ child.title }}
                 </button>
@@ -398,7 +389,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
                   <DropdownMenuItem
                     @select="unschedule(child.item, arrangement.taskId)"
                     >{{
-                      child.item.recurrence ? "从今天移除" : "移出当日"
+                      child.item.recurrence ? "跳过今天" : "移出当日"
                     }}</DropdownMenuItem
                   >
                 </DropdownMenuContent>
@@ -470,7 +461,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
           v-if="!arrangement.done || !arrangement.recurrence"
           variant="ghost"
           @click="unschedule(arrangement)"
-          >{{ arrangement.recurrence ? "从今天移除" : "移出当日" }}</Button
+          >{{ arrangement.recurrence ? "跳过今天" : "移出当日" }}</Button
         >
       </div>
     </div>

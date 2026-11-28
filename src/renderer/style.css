@@ -561,6 +561,10 @@ details.today-completed {
   color: var(--accent);
   padding: 4px 0;
 }
+.recurrence-stopped-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
 .stage-goal {
   margin: 5px 0 0 26px;
   color: var(--text);
@@ -898,10 +902,28 @@ details.today-completed {
   padding: 12px 4px;
   text-align: left;
 }
+.task-list-check {
+  flex: none;
+  padding: 5px 4px;
+}
 .schedule-today-action {
   flex: none;
   margin: 4px 0 4px auto;
   white-space: nowrap;
+}
+.repeat-history-action {
+  flex: none;
+  margin-inline-start: auto;
+}
+.repeat-completion-dates {
+  display: grid;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-inline-start: 1.25rem;
+}
+.list-task-details .repeat-overdue time {
+  color: var(--danger);
 }
 .list-task-name {
   flex: 1;

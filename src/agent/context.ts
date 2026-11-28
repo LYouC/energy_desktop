@@ -5,7 +5,7 @@ import {
   type State,
   type Task,
 } from "../domain/model";
-import { effectiveRecurrences } from "../domain/recurrence";
+import { effectiveRecurrences, repeatTaskStatuses } from "../domain/recurrence";
 import {
   isArrangementDone,
   isTaskOpen,
@@ -81,6 +81,11 @@ export function tasksForAgent(
   });
 }
 
+export function taskAttributesForAgent<T extends Task>(task: T) {
+  const { status, ...attributes } = task;
+  return { ...attributes, ...(task.recurrence ? {} : { status }) };
+}
+
 export function refersToCurrentTasks(
   change: Change,
   taskIds: ReadonlySet<string>,
@@ -99,6 +104,7 @@ export function buildContext(state: State, sessionId: string, date?: string) {
   const tasksById = new Map(tasks.map((task) => [task.id, task]));
   const taskIds = new Set(tasks.map((task) => task.id));
   const active = tasks.filter((task) => task.recurrence || isTaskOpen(task));
+  const repeats = repeatTaskStatuses(state, date);
   const messages = state.messages.filter(
     (message) => message.sessionId === sessionId,
   );
@@ -129,7 +135,8 @@ export function buildContext(state: State, sessionId: string, date?: string) {
       .map(({ arrangement }) => arrangement)
       .filter((item) => item.date === date && taskIds.has(item.taskId)),
     unfinishedTasks: active.map((task) => ({
-      ...task,
+      ...taskAttributesForAgent(task),
+      ...(repeats.has(task.id) ? { repeatProgress: repeats.get(task.id) } : {}),
       previousArrangements: state.arrangements.filter(
         (item) =>
           item.taskId === task.id && item.date < date && !item.recurrence,

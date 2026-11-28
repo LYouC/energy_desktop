@@ -15,6 +15,7 @@
 - 未打包运行时开放 `agent:context` 读取接口。本次进程最多保留最近 20 轮的请求体，手动重试用新一批实际请求替换同轮记录。认证请求头不进入历史，打包版本关闭捕获及读取接口。
 - 开发时加载 Vite 服务，构建后加载 `dist/index.html`。Vite 分别产出 `dist-electron/main.js` 和 `dist-electron/preload.mjs`，应用入口由根目录 `package.json` 指定。
 - 默认使用 Electron 的 userData 目录。开发和测试可用 `XIXU_DATA_DIR` 指定独立目录。未打包时可读取仓库根的本地模型环境配置。
+- 连接 Vite 开发服务的未打包进程允许持久化层自动清空并重建格式不匹配的工作区。构建版直接启动和打包版继续报告格式错误。
 
 运行 `npm run test:desktop` 验证窗口、桥接、主要交互和重启恢复。打包后可运行 `node tests/pack.smoke.mjs` 验证便携目录独立启动。
 

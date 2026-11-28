@@ -12,26 +12,6 @@ export function taskAncestorIds(tasks: ReadonlyMap<string, Task>, id: string) {
   return ancestors;
 }
 
-export function arrangementAncestorIds(
-  tasks: ReadonlyMap<string, Task>,
-  item: Arrangement,
-) {
-  return item.recurrence
-    ? item.recurrence.ancestorIds
-    : taskAncestorIds(tasks, item.taskId);
-}
-
-export function occurrenceSnapshot(
-  tasks: ReadonlyMap<string, Task>,
-  task: Task,
-) {
-  return {
-    title: task.title,
-    ancestorIds: taskAncestorIds(tasks, task.id),
-    version: 0,
-  };
-}
-
 export function effectiveRecurrences(tasks: Task[]) {
   type EffectiveRecurrence = { sourceId: string; rule: RecurrenceRule };
   const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -73,10 +53,14 @@ function utcDay(date: string) {
   return new Date(`${date}T00:00:00.000Z`);
 }
 
-function followingDate(date: string): string | null {
+function shiftedDate(date: string, offset: number): string | null {
   const day = utcDay(date);
-  day.setUTCDate(day.getUTCDate() + 1);
-  if (!Number.isFinite(day.getTime()) || day.getUTCFullYear() > 9999)
+  day.setUTCDate(day.getUTCDate() + offset);
+  if (
+    !Number.isFinite(day.getTime()) ||
+    day.getUTCFullYear() > 9999 ||
+    day.getUTCFullYear() < 0
+  )
     return null;
   return day.toISOString().slice(0, 10);
 }
@@ -100,90 +84,178 @@ export function nextRecurrenceDate(
   for (
     let offset = 0;
     offset < 7 && date;
-    offset++, date = followingDate(date)
+    offset++, date = shiftedDate(date, 1)
   ) {
     if (rule.weekdays.includes(utcDay(date).getUTCDay())) return date;
   }
   return null;
 }
 
-export function synchronizeRecurrence(state: State, date: string): boolean {
-  const cursors = new Map(
-    state.repeatCursors.map((cursor) => [cursor.taskId, cursor]),
+export type RepeatSchedule = State["repeatSchedules"][number];
+type RepeatCompletion = State["repeatCompletions"][number];
+
+export function latestRecurrenceDate(
+  rule: RecurrenceRule,
+  schedule: RepeatSchedule,
+  today: string,
+) {
+  let date: string | null =
+    rule.type === "range" ? (today < rule.end ? today : rule.end) : today;
+  for (
+    let offset = 0;
+    offset < 7 && date && date >= schedule.since;
+    offset++, date = shiftedDate(date, -1)
+  ) {
+    if (nextRecurrenceDate(rule, date) === date) return date;
+  }
+  return schedule.previousDate && schedule.previousDate <= today
+    ? schedule.previousDate
+    : null;
+}
+
+export function recurrenceProgress(
+  rule: RecurrenceRule,
+  schedule: RepeatSchedule,
+  completions: readonly RepeatCompletion[],
+  today: string,
+) {
+  if (schedule.stoppedOn)
+    return { target: null, overdue: false, canComplete: false, undo: null };
+  const current = latestRecurrenceDate(rule, schedule, today);
+  const completed =
+    current !== null && completions.some(({ date }) => date === current);
+  const pending =
+    current && current !== schedule.skippedDate && !completed ? current : null;
+  const tomorrow = shiftedDate(today, 1);
+  const nextStart =
+    tomorrow && (schedule.since > tomorrow ? schedule.since : tomorrow);
+  return {
+    target: pending ?? (nextStart ? nextRecurrenceDate(rule, nextStart) : null),
+    overdue: pending !== null && pending < today,
+    canComplete: pending !== null,
+    undo: completed ? current : null,
+  };
+}
+
+export function repeatCompletionsByTask(state: State) {
+  const records = new Map<string, RepeatCompletion[]>();
+  for (const item of state.repeatCompletions) {
+    const list = records.get(item.taskId) ?? [];
+    list.push(item);
+    records.set(item.taskId, list);
+  }
+  return records;
+}
+
+export function repeatTaskStatuses(state: State, date: string) {
+  const completions = repeatCompletionsByTask(state);
+  const rules = new Map(state.tasks.map((task) => [task.id, task.recurrence]));
+  return new Map(
+    state.repeatSchedules.flatMap((schedule) => {
+      const rule = rules.get(schedule.taskId);
+      if (!rule) return [];
+      const records = completions.get(schedule.taskId) ?? [];
+      return [
+        [
+          schedule.taskId,
+          {
+            ...recurrenceProgress(rule, schedule, records, date),
+            stopped: Boolean(schedule.stoppedOn),
+            completionCount: records.length,
+          },
+        ] as const,
+      ];
+    }),
   );
-  const previouslySkipped = state.skippedOccurrences;
+}
+
+export function synchronizeRecurrence(state: State, date: string): boolean {
   let changed = false;
   const tasks = new Map(state.tasks.map((task) => [task.id, task]));
-  if (previouslySkipped.some((item) => item.arrangement.date < date)) {
-    state.skippedOccurrences = previouslySkipped.filter(
-      (item) => item.arrangement.date >= date,
-    );
-    changed = true;
-  }
-  const skipped = state.skippedOccurrences.map(
-    ({ arrangement }) => arrangement,
-  );
-
   const recurrences = effectiveRecurrences(state.tasks);
-  const templates = state.tasks.flatMap((task) => {
-    const rule = recurrences.get(task.id)?.rule;
-    return rule ? [{ task, rule }] : [];
-  });
-  for (const id of cursors.keys()) {
-    if (!recurrences.get(id)) {
-      cursors.delete(id);
-      changed = true;
-    }
-  }
-
-  const due = templates.filter(({ task, rule }) => {
-    const cursor = cursors.get(task.id);
-    if (!cursor) return true;
-    if (cursor.through >= date) return false;
-    return (
-      rule.type !== "range" || (cursor.through < rule.end && date >= rule.start)
-    );
-  });
-
-  const scheduled = new Map<string, Map<string, Arrangement>>();
-  if (due.length) {
-    const dueIds = new Set(due.map(({ task }) => task.id));
-    for (const item of [...state.arrangements, ...skipped]) {
-      if (!dueIds.has(item.taskId)) continue;
-      const taskDates = scheduled.get(item.taskId) ?? new Map();
-      taskDates.set(item.date, item);
-      scheduled.set(item.taskId, taskDates);
-    }
-  }
-
-  for (const { task, rule } of due) {
-    const cursor = cursors.get(task.id);
-    const start = cursor ? followingDate(cursor.through) : date;
-    if (!start) continue;
-    const taskDates = scheduled.get(task.id);
-    for (
-      let occurrenceDate = nextRecurrenceDate(rule, start);
-      occurrenceDate && occurrenceDate <= date;
-    ) {
-      const existing = taskDates?.get(occurrenceDate);
-      const snapshot = occurrenceSnapshot(tasks, task);
-      if (existing) existing.recurrence ??= snapshot;
-      else
-        state.arrangements.push({
-          taskId: task.id,
-          date: occurrenceDate,
-          scope: task.title,
-          done: false,
-          recurrence: snapshot,
-        });
-      const following = followingDate(occurrenceDate);
-      occurrenceDate = following ? nextRecurrenceDate(rule, following) : null;
-    }
-    const through = rule.type === "range" && rule.end < date ? rule.end : date;
-    cursors.set(task.id, { taskId: task.id, through });
+  const schedules = new Map(
+    state.repeatSchedules.map((entry) => [entry.taskId, entry]),
+  );
+  for (const task of state.tasks) {
+    if (!task.recurrence || schedules.has(task.id)) continue;
+    const schedule = { taskId: task.id, since: date };
+    state.repeatSchedules.push(schedule);
+    schedules.set(task.id, schedule);
     changed = true;
   }
 
-  if (changed) state.repeatCursors = [...cursors.values()];
+  const currentSkips = state.skippedOccurrences.filter(
+    ({ arrangement, groupRootId }) =>
+      arrangement.date === date &&
+      (!groupRootId ||
+        recurrences.get(arrangement.taskId)?.sourceId === groupRootId),
+  );
+  if (currentSkips.length !== state.skippedOccurrences.length) {
+    state.skippedOccurrences = currentSkips;
+    changed = true;
+  }
+  const skippedIds = new Set(
+    currentSkips.map(({ arrangement }) => arrangement.taskId),
+  );
+  const completedToday = new Set(
+    state.repeatCompletions
+      .filter((item) => item.date === date)
+      .map((item) => item.taskId),
+  );
+  const todayItems = new Map(
+    state.arrangements
+      .filter((item) => item.date === date)
+      .map((item) => [item.taskId, item]),
+  );
+  const visible = new Map<string, string>();
+  for (const [id, repeat] of recurrences) {
+    if (!repeat) continue;
+    const schedule = schedules.get(repeat.sourceId)!;
+    if (
+      date < schedule.since ||
+      schedule.skippedDate === date ||
+      skippedIds.has(id) ||
+      nextRecurrenceDate(repeat.rule, date) !== date ||
+      (schedule.stoppedOn &&
+        (schedule.stoppedOn !== date ||
+          !completedToday.has(repeat.sourceId) ||
+          (id !== repeat.sourceId && !todayItems.get(id)?.done)))
+    )
+      continue;
+    visible.set(id, repeat.sourceId);
+  }
+
+  const retained = state.arrangements.filter(
+    (item) =>
+      (item.date === date && visible.has(item.taskId)) ||
+      (!item.recurrence && (item.date < date || !recurrences.get(item.taskId))),
+  );
+  if (retained.length !== state.arrangements.length) {
+    state.arrangements = retained;
+    changed = true;
+  }
+  for (const [id, sourceId] of visible) {
+    const task = tasks.get(id)!;
+    const existing = todayItems.get(id);
+    if (!existing?.recurrence) {
+      const values = {
+        scope: task.title,
+        done: id === sourceId && completedToday.has(sourceId),
+        recurrence: { version: 0 },
+      };
+      if (existing) Object.assign(existing, values);
+      else state.arrangements.push({ taskId: id, date, ...values });
+      changed = true;
+    } else {
+      const done =
+        id === sourceId ? completedToday.has(sourceId) : existing.done;
+      if (existing.done !== done || existing.scope !== task.title) {
+        existing.done = done;
+        existing.scope = task.title;
+        existing.recurrence.version++;
+        changed = true;
+      }
+    }
+  }
   return changed;
 }

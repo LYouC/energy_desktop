@@ -10,13 +10,14 @@ import { applyCommand } from "../domain/operations";
 import { synchronizeRecurrence } from "../domain/recurrence";
 import { applyAgentTurn } from "../agent/turn";
 
-const workspaceVersion = 8;
+const workspaceVersion = 10;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;
   constructor(
     filename: string,
     private today = localDate,
+    { resetOnFormatMismatch = false } = {},
   ) {
     this.db = new DatabaseSync(filename);
     try {
@@ -32,10 +33,13 @@ export class WorkspaceDatabase {
           this.db
             .prepare("SELECT 1 FROM sqlite_schema WHERE name = 'workspace'")
             .get();
-        if (version !== 0 || existingWorkspace)
-          throw new Error(
-            "工作区格式与当前版本不一致。请关闭应用，移走 workspace.db 及同名的 -wal、-shm 文件（如存在），再启动以创建新工作区。",
-          );
+        if (version !== 0 || existingWorkspace) {
+          if (!resetOnFormatMismatch)
+            throw new Error(
+              "工作区格式与当前版本不一致。请关闭应用，移走 workspace.db 及同名的 -wal、-shm 文件（如存在），再启动以创建新工作区。",
+            );
+          this.db.exec("DROP TABLE IF EXISTS workspace");
+        }
         this.db.exec(
           "CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK(id = 1), payload TEXT NOT NULL);",
         );

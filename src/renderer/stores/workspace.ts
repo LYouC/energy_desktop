@@ -6,6 +6,20 @@ import { effectiveRecurrences } from "../../domain/recurrence";
 export const useWorkspace = defineStore("workspace", () => {
   const state = ref<State>(emptyState());
   const recurrences = computed(() => effectiveRecurrences(state.value.tasks));
+  const stoppedRecurrenceSources = computed(
+    () =>
+      new Set(
+        state.value.repeatSchedules
+          .filter(({ stoppedOn }) => stoppedOn)
+          .map(({ taskId }) => taskId),
+      ),
+  );
+  function isRecurrenceStopped(taskId: string) {
+    const recurrence = recurrences.value.get(taskId);
+    return recurrence
+      ? stoppedRecurrenceSources.value.has(recurrence.sourceId)
+      : false;
+  }
   const ready = ref(false);
   const error = ref("");
   let queue: Promise<unknown> = Promise.resolve();
@@ -44,5 +58,13 @@ export const useWorkspace = defineStore("workspace", () => {
     queue = work.catch(() => {});
     return work;
   }
-  return { state, recurrences, ready, error, load, dispatch };
+  return {
+    state,
+    recurrences,
+    isRecurrenceStopped,
+    ready,
+    error,
+    load,
+    dispatch,
+  };
 });

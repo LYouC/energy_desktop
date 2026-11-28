@@ -13,19 +13,12 @@ export function taskGroups<T>(
     items.map((item) => [taskId(item), { item, children: [] }]),
   );
   const roots: TaskGroup<T>[] = [];
-  const displayedParents = new Map<string, string>();
   for (const [id, group] of groups) {
     const parentId = (
       ancestorIds?.(group.item) ?? taskAncestorIds(tasks, id)
     ).find((parent) => groups.has(parent));
-    let ancestor = parentId;
-    while (ancestor && ancestor !== id)
-      ancestor = displayedParents.get(ancestor);
-    // Snapshots generated at different times can disagree on ancestry.
-    if (parentId && ancestor !== id) {
-      displayedParents.set(id, parentId);
-      groups.get(parentId)!.children.push(group);
-    } else roots.push(group);
+    if (parentId) groups.get(parentId)!.children.push(group);
+    else roots.push(group);
   }
   return roots;
 }

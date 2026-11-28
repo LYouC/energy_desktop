@@ -6,7 +6,6 @@ import path from "node:path";
 import { commandSchema, emptyState, newTask } from "../src/domain/model";
 import {
   applyCommand,
-  isArrangementPending,
   schedulableTodayTasks,
   unscheduledTasksDue,
 } from "../src/domain/operations";
@@ -272,7 +271,7 @@ test("A21 整体完成覆盖各层一次性子任务，重复实例保持独立"
   assert.deepEqual(restored.arrangements, state.arrangements);
 });
 
-test("普通任务继承未来重复后，今天的临时安排可改范围并独立完成和恢复", () => {
+test("普通任务继承未来重复后，移除与新规则冲突的今日安排", () => {
   const date = "2026-11-23";
   const parent = { ...newTask(), title: "练习" };
   const child = { ...newTask(parent.id), title: "朗读" };
@@ -300,44 +299,16 @@ test("普通任务继承未来重复后，今天的临时安排可改范围并�
     },
     date,
   );
-  assert.equal(state.arrangements[0].recurrence, undefined);
-  assert.equal(
-    isArrangementPending(state.arrangements[0], state.tasks[1], true),
-    true,
+  assert.deepEqual(state.arrangements, []);
+  assert.equal(state.tasks[1].status, "done");
+  const next = applyCommand(
+    state,
+    { type: "energy", value: "状态平稳" },
+    "2026-11-24",
   );
-  const completion = {
-    type: "setOccurrenceDone",
-    taskId: child.id,
-    date,
-    done: true,
-  } as const;
-  const finished = applyCommand(state, completion, date);
-  assert.equal(
-    isArrangementPending(finished.arrangements[0], finished.tasks[1], true),
-    false,
-  );
-  const restored = applyCommand(finished, { ...completion, done: false }, date);
-  assert.equal(
-    isArrangementPending(restored.arrangements[0], restored.tasks[1], true),
-    true,
-  );
-  assert.equal(restored.tasks[1].status, "done");
-  const updated = applyCommand(
-    restored,
-    {
-      type: "updateOccurrenceScope",
-      taskId: child.id,
-      date,
-      scope: "朗读两遍",
-    },
-    date,
-  );
-  assert.equal(updated.arrangements[0].scope, "朗读两遍");
-  assert.equal(updated.arrangements[0].recurrence, undefined);
-  assert.deepEqual(updated.tasks[0].recurrence, {
-    type: "weekly",
-    weekdays: [2],
-  });
+  const found = next.arrangements.find((item) => item.taskId === child.id);
+  assert.equal(found?.date, "2026-11-24");
+  assert.equal(found?.done, false);
 });
 
 test("普通任务与子任务共用最小字段，名称以外可以留空", () => {

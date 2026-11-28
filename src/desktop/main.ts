@@ -10,10 +10,13 @@ import { AgentRuntime } from "../agent/runtime";
 import { AgentContextHistory } from "./agent-context";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 let database: WorkspaceDatabase | undefined;
 function getDatabase() {
   database ??= new WorkspaceDatabase(
     path.join(app.getPath("userData"), "workspace.db"),
+    undefined,
+    { resetOnFormatMismatch: !app.isPackaged && Boolean(devServerUrl) },
   );
   return database;
 }
@@ -46,8 +49,7 @@ async function createWindow() {
   };
   window.on("maximize", publishWindowState);
   window.on("unmaximize", publishWindowState);
-  if (process.env.VITE_DEV_SERVER_URL)
-    await window.loadURL(process.env.VITE_DEV_SERVER_URL);
+  if (devServerUrl) await window.loadURL(devServerUrl);
   else await window.loadFile(path.join(root, "../dist/index.html"));
 }
 app.whenReady().then(() => {

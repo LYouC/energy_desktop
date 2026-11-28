@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, renameSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -400,7 +400,7 @@ test("拒绝非当前版本的数据库，原始工作区不被改写", () => {
   raw.exec("CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT)");
   const payload = JSON.stringify({ tasks: [{ title: "已有任务" }] });
   raw.prepare("INSERT INTO workspace VALUES (1, ?)").run(payload);
-  for (const version of [0, 7, 9]) {
+  for (const version of [0, 9, 11]) {
     raw.exec(`PRAGMA user_version=${version}`);
     assert.throws(
       () => new WorkspaceDatabase(filename),
@@ -423,6 +423,36 @@ test("拒绝非当前版本的数据库，原始工作区不被改写", () => {
   fresh.close();
 });
 
+test("开发模式重建过期工作区，后续打开保留同版本数据", (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "xixu-dev-workspace-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, "workspace.db");
+  const raw = new DatabaseSync(filename);
+  raw.exec("CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT)");
+  raw.exec("PRAGMA user_version=9");
+  raw.prepare("INSERT INTO workspace VALUES (1, ?)").run('{"old":true}');
+  raw.close();
+
+  const options = { resetOnFormatMismatch: true };
+  const rebuilt = new WorkspaceDatabase(filename, undefined, options);
+  try {
+    assert.deepEqual(rebuilt.load().tasks, []);
+    rebuilt.execute(rebuilt.load().revision, {
+      type: "saveTask",
+      task: { ...newTask(), title: "本次开发任务" },
+    });
+  } finally {
+    rebuilt.close();
+  }
+
+  const reopened = new WorkspaceDatabase(filename, undefined, options);
+  try {
+    assert.equal(reopened.load().tasks[0].title, "本次开发任务");
+  } finally {
+    reopened.close();
+  }
+});
+
 test("损坏的工作区打开失败，原始内容仍可检查", () => {
   const filename = path.join(
     mkdtempSync(path.join(tmpdir(), "xixu-corrupt-test-")),
@@ -436,6 +466,12 @@ test("损坏的工作区打开失败，原始内容仍可检查", () => {
     .run('{"broken":true}');
   raw.close();
   assert.throws(() => new WorkspaceDatabase(filename));
+  assert.throws(
+    () =>
+      new WorkspaceDatabase(filename, undefined, {
+        resetOnFormatMismatch: true,
+      }),
+  );
   const inspect = new DatabaseSync(filename);
   assert.equal(
     inspect.prepare("SELECT payload FROM workspace").get()?.payload,

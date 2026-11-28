@@ -119,8 +119,6 @@ export const arrangementSchema = z.object({
   done: z.boolean(),
   recurrence: z
     .object({
-      title: taskSchema.shape.title,
-      ancestorIds: z.array(z.string()),
       version: z.number().int().nonnegative(),
     })
     .optional(),
@@ -130,7 +128,7 @@ const changeStatus = z.enum(["pending", "accepted", "rejected"]);
 const changeSchema = z.object({
   id: z.string(),
   taskId: z.string(),
-  taskVersion: z.number().nullable(),
+  taskVersion: z.number().int(),
   label: z.string(),
   type: z.enum([
     "schedule",
@@ -139,13 +137,14 @@ const changeSchema = z.object({
     "unschedule",
     "updateRecurrence",
     "deleteRecurringTask",
-    "createOccurrence",
-    "updateOccurrenceScope",
+    "stopRecurrence",
+    "resumeRecurrence",
     "setOccurrenceDone",
     "skipOccurrence",
     "restoreOccurrence",
   ]),
   date: z.string(),
+  asOfDate: recurrenceDate.optional(),
   scope: z.string(),
   children: z.array(childTaskSchema.strict()),
   patch: taskPatchSchema.optional(),
@@ -201,14 +200,28 @@ export const stateSchema = z.object({
   revision: z.number().int(),
   tasks: z.array(taskSchema),
   arrangements: z.array(arrangementSchema),
-  repeatCursors: z.array(
-    z.object({ taskId: z.string(), through: recurrenceDate }),
+  repeatSchedules: z.array(
+    z.object({
+      taskId: z.string(),
+      since: recurrenceDate,
+      previousDate: recurrenceDate.optional(),
+      skippedDate: recurrenceDate.optional(),
+      stoppedOn: recurrenceDate.optional(),
+    }),
+  ),
+  repeatCompletions: z.array(
+    z.object({
+      taskId: z.string(),
+      date: recurrenceDate,
+      completedOn: recurrenceDate,
+    }),
   ),
   skippedOccurrences: z.array(
     z.object({
       arrangement: arrangementSchema,
       previousTaskIds: z.array(z.string()),
       nextTaskIds: z.array(z.string()),
+      groupRootId: z.string().optional(),
     }),
   ),
   proposals: z.array(proposalSchema),
@@ -249,6 +262,10 @@ export const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("deleteTask"), id: z.string() }),
   z.object({
+    type: z.literal(["stopRecurrence", "resumeRecurrence"]),
+    taskId: z.string(),
+  }),
+  z.object({
     type: z.literal("setTaskDone"),
     taskId: z.string(),
     done: z.boolean(),
@@ -276,12 +293,6 @@ export const commandSchema = z.discriminatedUnion("type", [
     done: z.boolean(),
   }),
   z.object({
-    type: z.literal("createOccurrence"),
-    taskId: z.string(),
-    date: recurrenceDate,
-    scope: arrangementSchema.shape.scope,
-  }),
-  z.object({
     type: z.literal("skipOccurrence"),
     taskId: z.string(),
     date: recurrenceDate,
@@ -290,12 +301,6 @@ export const commandSchema = z.discriminatedUnion("type", [
     type: z.literal("restoreOccurrence"),
     taskId: z.string(),
     date: recurrenceDate,
-  }),
-  z.object({
-    type: z.literal("updateOccurrenceScope"),
-    taskId: z.string(),
-    date: recurrenceDate,
-    scope: arrangementSchema.shape.scope,
   }),
   z.object({
     type: z.literal("move"),
@@ -382,7 +387,8 @@ export function emptyState(): State {
     revision: 0,
     tasks: [],
     arrangements: [],
-    repeatCursors: [],
+    repeatSchedules: [],
+    repeatCompletions: [],
     skippedOccurrences: [],
     proposals: [],
     sessions: [session],

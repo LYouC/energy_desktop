@@ -68,7 +68,7 @@ test("近期候选包含日期与计划命中，排除今天两区、结束、�
     {
       arrangement: {
         ...arrangement("skipped", today),
-        recurrence: { title: "已移除", ancestorIds: [], version: 0 },
+        recurrence: { version: 0 },
       },
       previousTaskIds: [],
       nextTaskIds: [],
@@ -418,7 +418,7 @@ test("读取任务详情后，今日安排建议仍须命中候选", async () =>
   assert.deepEqual(turn.actions, []);
 });
 
-test("SDK 可由模板补加当天实例，终答收到单次范围和完成结果", async () => {
+test("SDK 可完成应做日期为今天的一轮，回执有累计次数与下一轮日期", async () => {
   const state = emptyState();
   let calls = 0;
   const model = new MockLanguageModelV4({
@@ -440,17 +440,10 @@ test("SDK 可由模板补加当天实例，终答收到单次范围和完成结�
                   recurrence: { type: "weekly", weekdays: [2] },
                 },
                 {
-                  type: "createOccurrence",
-                  mode: "direct",
-                  taskId: "stretch",
-                  date: "2026-11-23",
-                  scope: "只拉伸肩部",
-                },
-                {
                   type: "setOccurrenceDone",
                   mode: "direct",
                   taskId: "stretch",
-                  date: "2026-11-23",
+                  date: "2026-11-24",
                   done: true,
                 },
               ],
@@ -460,25 +453,26 @@ test("SDK 可由模板补加当天实例，终答收到单次范围和完成结�
       const receipt = JSON.stringify(
         options.prompt.filter(({ role }) => role === "tool"),
       );
-      assert.match(receipt, /只拉伸肩部/);
-      assert.match(receipt, /"done":true/);
+      assert.match(receipt, /"completionCount":1/);
+      assert.match(receipt, /"target":"2026-12-01"/);
+      assert.doesNotMatch(receipt, /"status":"todo"/);
       assert.match(receipt, /"weekdays":\[2\]/);
-      return response([], "已记下今天这次拉伸并完成。");
+      return response([], "已记录今天这轮完成。");
     },
   });
   const result = await generateAgentTurn({
     state,
     sessionId: state.activeSessionId,
     focusedId: null,
-    userText: "设置每周二拉伸，今天单加肩部拉伸并记完成",
+    userText: "设置每周二拉伸，并勾完今天这轮",
     connection,
     model,
-    date: "2026-11-23",
+    date: "2026-11-24",
     signal: AbortSignal.timeout(10000),
     emit: () => {},
   });
   assert.equal(calls, 2);
-  assert.equal(result.turn.actions.length, 3);
+  assert.equal(result.turn.actions.length, 2);
 });
 
 test("SDK 仅在删除回执中说明已删模板，后续规划和读取不发送旧实例", async (context) => {
@@ -522,7 +516,7 @@ test("SDK 仅在删除回执中说明已删模板，后续规划和读取不发�
         case 4:
           assert.match(receipt, /"deletedTasks":\["拉伸"\]/);
           assert.match(receipt, /"arrangements":\[\]/);
-          return response([], "已删除模板，今天这次仍可在今日安排中处理。");
+          return response([], "已删除重复任务、今日安排及完成记录。");
         case 5: {
           const workspace = options.prompt.find((item) => item.role === "user");
           const text = workspace?.content.find(
@@ -567,7 +561,7 @@ test("SDK 仅在删除回执中说明已删模板，后续规划和读取不发�
   taskId = created.tasks[0].id;
   const deleted = await send("删除拉伸模板");
   assert.deepEqual(deleted.tasks, []);
-  assert.equal(deleted.arrangements[0].taskId, taskId);
+  assert.deepEqual(deleted.arrangements, []);
   const next = await send("记下晨读");
   assert.equal(next.tasks[0].title, "晨读");
   assert.deepEqual(next.arrangements, deleted.arrangements);

@@ -26,7 +26,7 @@ test("重复父任务的两个子任务跟随结算，次日重新开始", (t) =
     db.execute(db.load().revision, { type: "saveTask", task });
   const day = () => db.load().arrangements.filter((item) => item.date === date);
   assert.deepEqual(
-    day().map((item) => item.recurrence?.title),
+    day().map((item) => item.scope),
     ["工作日日常", "早睡早起", "读书"],
   );
   db.execute(db.load().revision, {
@@ -48,7 +48,7 @@ test("重复父任务的两个子任务跟随结算，次日重新开始", (t) =
   assert.deepEqual(day(), []);
 });
 
-test("删除模板后保留今日实例并停止生成，Agent 的今日计划只包含现存任务", (t) => {
+test("删除模板后清理今日安排和完成记录，Agent 的今日计划只包含现存任务", (t) => {
   let date = "2026-11-23";
   const db = new WorkspaceDatabase(":memory:", () => date);
   t.after(() => db.close());
@@ -73,12 +73,14 @@ test("删除模板后保留今日实例并停止生成，Agent 的今日计划�
     db.execute(db.load().revision, command);
   execute({ type: "skipOccurrence", taskId: skipped.id, date });
   execute({ type: "deleteTask", id: skipped.id });
+  execute({ type: "setOccurrenceDone", taskId: removed.id, date, done: true });
   const state = execute({ type: "deleteTask", id: removed.id });
   assert.ok(
-    state.arrangements.some(
+    !state.arrangements.some(
       (item) => item.taskId === removed.id && item.date === date,
     ),
   );
+  assert.deepEqual(state.repeatCompletions, []);
   const context = buildContext(state, state.activeSessionId, date);
   assert.deepEqual(
     context.today.map((item) => item.taskId),
@@ -95,7 +97,7 @@ test("删除模板后保留今日实例并停止生成，Agent 的今日计划�
   );
 });
 
-test("已有子任务获得父规则，父规则更新保留当天，独立规则继续生效", (t) => {
+test("已有子任务获得父规则，父规则立即生效，独立规则继续生效", (t) => {
   let date = "2026-11-23";
   const db = new WorkspaceDatabase(":memory:", () => date);
   t.after(() => db.close());
@@ -129,13 +131,13 @@ test("已有子任务获得父规则，父规则更新保留当天，独立规�
     {
       taskId: child.id,
       date,
-      scope: "保留既有范围",
+      scope: child.title,
       done: true,
-      recurrence: { title: "练习", ancestorIds: [parent.id], version: 1 },
+      recurrence: { version: 1 },
     },
   );
   setParentRule([3]);
-  assert.deepEqual(db.load().arrangements, first);
+  assert.deepEqual(db.load().arrangements, []);
   date = "2026-11-24";
   assert.equal(
     db.load().arrangements.some((item) => item.date === date),
@@ -182,16 +184,8 @@ test("关闭期间的重复安排在重开时持久化，跳过一天不补回",
   database = new WorkspaceDatabase(filename, () => date);
   const reconciled = database.load();
   assert.deepEqual(
-    reconciled.arrangements.map((item) => [
-      item.date,
-      item.done,
-      item.recurrence?.title,
-    ]),
-    [
-      ["2026-11-17", false, "练英语"],
-      ["2026-11-18", false, "练英语"],
-      ["2026-11-19", false, "练英语"],
-    ],
+    reconciled.arrangements.map((item) => [item.date, item.done, item.scope]),
+    [["2026-11-19", false, "练英语"]],
   );
   assert.ok(reconciled.revision > skipped.revision);
   assert.deepEqual(database.load(), reconciled);
@@ -238,8 +232,39 @@ test("跨日时使用旧工作区版本操作会刷新安排并提示重试", (t
   assert.equal(refreshed.tasks.length, 1);
   assert.deepEqual(
     refreshed.arrangements.map((item) => item.date),
-    ["2026-11-20", "2026-11-21"],
+    ["2026-11-21"],
   );
+});
+
+test("停止后重启保留当天的完成记录，恢复使用原结果", (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "xixu-repeat-stopped-"));
+  const filename = path.join(directory, "workspace.db");
+  const date = "2026-11-25";
+  let db = new WorkspaceDatabase(filename, () => date);
+  t.after(() => {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const task = {
+    ...newTask(),
+    title: "复习",
+    recurrence: { type: "daily" as const },
+  };
+  const execute = (command: Parameters<typeof db.execute>[1]) =>
+    db.execute(db.load().revision, command);
+  execute({ type: "saveTask", task });
+  execute({ type: "setOccurrenceDone", taskId: task.id, date, done: true });
+  const stopped = execute({ type: "stopRecurrence", taskId: task.id });
+  db.close();
+  db = new WorkspaceDatabase(filename, () => date);
+  assert.equal(db.load().arrangements[0].done, true);
+  assert.deepEqual(db.load().repeatCompletions, stopped.repeatCompletions);
+  const resumed = execute({ type: "resumeRecurrence", taskId: task.id });
+  assert.equal(resumed.arrangements[0].done, true);
+  assert.deepEqual(resumed.repeatCompletions, stopped.repeatCompletions);
+  const deleted = execute({ type: "deleteTask", id: task.id });
+  assert.equal(deleted.arrangements.length, 0);
+  assert.equal(deleted.repeatCompletions.length, 0);
 });
 
 test("Agent 不会用普通安排动作覆盖重复实例", () => {
@@ -267,7 +292,7 @@ test("Agent 不会用普通安排动作覆盖重复实例", () => {
           },
         ],
       }),
-    /请选择对应的重复任务操作/,
+    /请通过规则或当前轮次调整重复任务/,
   );
 });
 
@@ -289,7 +314,7 @@ test("规划上下文显示当天重复实例，历史错过不进入未完成�
   );
   const context = buildContext(state, state.activeSessionId, "2026-11-21");
   assert.deepEqual(
-    context.today.map((item) => item.recurrence?.title),
+    context.today.map((item) => item.scope),
     ["记单词"],
   );
   assert.deepEqual(context.unfinishedTasks[0].previousArrangements, []);

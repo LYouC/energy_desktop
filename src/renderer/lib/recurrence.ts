@@ -1,5 +1,4 @@
 import {
-  localDate,
   statusLabels,
   taskSubtreeIds,
   type Arrangement,
@@ -17,12 +16,6 @@ export const weekdays = [
   [6, "周六"],
   [0, "周日"],
 ] as const;
-
-export function tomorrow(date: string) {
-  const day = new Date(`${date}T12:00:00`);
-  day.setDate(day.getDate() + 1);
-  return localDate(day);
-}
 
 export function recurrenceLabel(rule: RecurrenceRule) {
   if (rule.type === "daily") return "每天";

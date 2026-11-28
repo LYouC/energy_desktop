@@ -70,11 +70,7 @@ const hasPendingToday = computed(() => {
       (item) =>
         item.date === today &&
         tasks.has(item.taskId) &&
-        isArrangementPending(
-          item,
-          tasks.get(item.taskId),
-          Boolean(store.recurrences.get(item.taskId)),
-        ),
+        isArrangementPending(item, tasks.get(item.taskId)),
     )
   );
 });
@@ -358,12 +354,12 @@ function changeSummary(change: Change) {
     case "deleteRecurringTask": {
       const children = change.descendantIds?.length ?? 0;
       const scope = children ? `同时删除 ${children} 项子任务。 ` : "";
-      return `${scope}停止生成新实例。删除模板后，当天已有的实例仍可处理。`;
+      return `${scope}删除所有轮次及完成记录。`;
     }
-    case "createOccurrence":
-      return `补加 ${change.date} · ${change.scope}`;
-    case "updateOccurrenceScope":
-      return `调整 ${change.date} 的范围 · ${change.scope}`;
+    case "stopRecurrence":
+      return "移除今天未完成的一轮，保留完成记录。";
+    case "resumeRecurrence":
+      return "按现有规则继续，停止期间不补排。";
     case "setOccurrenceDone":
       return `${change.date} · ${change.done ? "完成这次" : "恢复为未完成"}${completionDetails(change)}`;
     case "skipOccurrence":

@@ -14,11 +14,13 @@ import {
   buildContext,
   readConversation,
   refersToCurrentTasks,
+  taskAttributesForAgent,
   tasksForAgent,
   upcomingTasks,
 } from "./context";
 import { localDate, type Command, type State } from "../domain/model";
 import { applyCommand, schedulableTodayTasks } from "../domain/operations";
+import { repeatTaskStatuses } from "../domain/recurrence";
 import { agentInstructions } from "./prompt";
 import { capacitySchema, calculateCapacity } from "./capacity";
 
@@ -93,6 +95,8 @@ export function planningSnapshot(state: State) {
     state.tasks,
     state.arrangements,
     state.skippedOccurrences,
+    state.repeatSchedules,
+    state.repeatCompletions,
     state.proposals,
     state.energy,
     state.preferences,
@@ -262,18 +266,18 @@ export async function generateAgentTurn(options: {
         );
         const nextTasks = new Map(updatedTasks.map((task) => [task.id, task]));
         const nextTaskIds = new Set(nextTasks.keys());
+        const repeatStatuses = repeatTaskStatuses(next, context.date);
         const withTaskTitle = (item: State["arrangements"][number]) => {
           const task = nextTasks.get(item.taskId);
-          const { taskId: _taskId, ...arrangement } = arrangementForAgent(
-            item,
-            task,
-          );
+          const {
+            taskId: _taskId,
+            recurrence,
+            ...arrangement
+          } = arrangementForAgent(item, task);
           return {
             ...arrangement,
-            recurrence: arrangement.recurrence
-              ? { title: arrangement.recurrence.title }
-              : undefined,
-            taskTitle: arrangement.recurrence?.title ?? task?.title,
+            ...(recurrence ? { repeating: true } : {}),
+            taskTitle: task?.title,
           };
         };
         prepared = actions;
@@ -298,7 +302,7 @@ export async function generateAgentTurn(options: {
               recurrence,
             }) => ({
               title,
-              status,
+              ...(recurrence ? {} : { status }),
               startDate,
               expectedDate,
               description,
@@ -308,6 +312,14 @@ export async function generateAgentTurn(options: {
                 : null,
             }),
           ),
+          repeatResults: next.repeatSchedules.flatMap(({ taskId }) => {
+            const before = context.unfinishedTasks.find(
+              (task) => task.id === taskId,
+            )?.repeatProgress;
+            const after = repeatStatuses.get(taskId);
+            if (JSON.stringify(before) === JSON.stringify(after)) return [];
+            return [{ title: nextTasks.get(taskId)?.title, progress: after }];
+          }),
           deletedTasks: state.tasks
             .filter((task) => !nextTasks.has(task.id))
             .map(({ title }) => title),
@@ -480,14 +492,22 @@ export async function generateAgentTurn(options: {
       }),
       readTask: tool({
         description:
-          "按任务ID查看现存任务的属性、子任务、普通安排与当天重复实例，包括已从今天移除的实例。已删除的任务返回 task:null。更新说明前核实旧内容。",
+          "按任务ID查看属性、子任务、安排和重复完成记录。已删除的任务返回 task:null。更新说明前核实旧内容。",
         inputSchema: z.object({ taskId: z.string() }),
         execute: async ({ taskId }) => {
           emit({ type: "status", text: "正在查看相关任务背景…" });
           const task = contextTasks.find((item) => item.id === taskId) ?? null;
           return {
-            task,
-            children: contextTasks.filter((t) => t.parentId === taskId),
+            task: task ? taskAttributesForAgent(task) : null,
+            repeatProgress: context.unfinishedTasks.find(
+              (entry) => entry.id === taskId,
+            )?.repeatProgress,
+            repeatCompletions: state.repeatCompletions.filter(
+              (entry) => entry.taskId === taskId,
+            ),
+            children: contextTasks
+              .filter((t) => t.parentId === taskId)
+              .map(taskAttributesForAgent),
             arrangements: task
               ? state.arrangements
                   .filter(

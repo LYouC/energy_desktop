@@ -345,10 +345,10 @@ const rangeEnd = new Date(`${today}T12:00:00`);
 rangeEnd.setDate(rangeEnd.getDate() + 2);
 const end = localDate(rangeEnd);
 await run(
-  "B09a 创建三种重复规则并设置今天范围",
+  "B09a 创建三种重复规则并记录任务说明",
   emptyState(),
-  `帮我设置三个重复任务：每天拉伸，今天做五分钟；每周一、三、五慢跑；从今天到 ${end} 每天复习。`,
-  ["按明确授权直接设置规则，区分模板和本次范围，回复说明已保存的频率。"],
+  `帮我设置三个重复任务：每天拉伸五分钟；每周一、三、五慢跑；从今天到 ${end} 每天复习。`,
+  ["按明确授权直接设置规则，回复说明已保存的频率。"],
   (_before, next) => {
     assert.equal(next.tasks.length, 3);
     const daily = next.tasks.find((task) => task.title.includes("拉伸"));
@@ -368,7 +368,7 @@ await run(
       (item) => item.taskId === daily?.id,
     );
     assert.equal(occurrence?.date, today);
-    assert.match(occurrence?.scope ?? "", /[五5]\s*分钟/);
+    assert.match(`${daily?.title} ${daily?.description}`, /[五5]\s*分钟/);
     assert.equal(occurrence?.done, false);
   },
 );
@@ -387,7 +387,7 @@ await run(
   "B09b 跳过今天并调整后续规律",
   repeating,
   "今天的拉伸跳过，以后改成每周一、三、五。",
-  ["按明确授权移出今天并更新模板，说明新规则从次日生效。"],
+  ["按明确授权跳过今天并更新重复规则，按新规则继续。"],
   (_before, next) => {
     assert.deepEqual(next.tasks[0].recurrence, {
       type: "weekly",
@@ -420,7 +420,7 @@ const recurringProposal = applyAgentTurn(
   repeating.activeSessionId,
   "先给我一个减轻重复负担的方案。",
   {
-    text: "建议以后每周一、三、五拉伸，今天这次保留。",
+    text: "建议改为每周一、三、五拉伸，接受后即按新规则安排。",
     actions: [
       {
         type: "updateRecurrence",
@@ -438,12 +438,18 @@ await run(
   recurringProposal,
   "可以，就按这条新规则执行。",
   ["通过原方案生效，只接受明确同意的规则。"],
-  (before, next) => {
+  (_before, next) => {
     assert.deepEqual(next.tasks[0].recurrence, {
       type: "weekly",
       weekdays: [1, 3, 5],
     });
-    assert.deepEqual(next.arrangements, before.arrangements);
+    const due = [1, 3, 5].includes(new Date(`${today}T12:00:00`).getDay());
+    assert.equal(
+      next.arrangements.some(
+        ({ taskId, date }) => taskId === stretch.id && date === today,
+      ),
+      due,
+    );
     assert.equal(next.proposals.at(-1)?.cards[0].status, "accepted");
   },
 );
@@ -456,13 +462,59 @@ await run(
   "B09e 已删除模板不作为当前计划",
   deleted,
   "今天那次拉伸我已经做完了，帮我标记一下。",
-  [
-    "说明当前计划没有该任务，可引导用户在「今日安排」手动处理今天已生成的实例。",
-  ],
+  ["说明当前计划没有该任务，保留工作区不变。"],
   (_before, next) => {
     assert.deepEqual(next.tasks, []);
-    assert.equal(next.arrangements.length, 1);
-    assert.equal(next.arrangements[0].done, false);
+    assert.deepEqual(next.arrangements, []);
+  },
+);
+const doneToday = applyCommand(
+  repeating,
+  { type: "setOccurrenceDone", taskId: stretch.id, date: today, done: true },
+  today,
+);
+await run(
+  "B09f 未来轮次须等到应做日期",
+  doneToday,
+  "明天那轮拉伸我提前做完了，也帮我记一次完成。",
+  ["说明明天的轮次到期才能勾选，已完成的今日轮次原样保留。"],
+  (before, next, turn) => {
+    assert.deepEqual(turn.actions, []);
+    assert.deepEqual(next.repeatCompletions, before.repeatCompletions);
+    assert.deepEqual(next.arrangements, before.arrangements);
+  },
+);
+const priorDay = new Date(`${today}T12:00:00`);
+priorDay.setDate(priorDay.getDate() - 1);
+const yesterdayDate = localDate(priorDay);
+const training = {
+  ...newTask(),
+  title: "限期训练",
+  recurrence: {
+    type: "range" as const,
+    start: yesterdayDate,
+    end: yesterdayDate,
+  },
+};
+const overdue = applyCommand(
+  emptyState(),
+  { type: "saveTask", task: training },
+  yesterdayDate,
+);
+await run(
+  "B09g 补完成逾期的最后一轮",
+  overdue,
+  "把昨天逾期的最后一轮限期训练补勾完成。",
+  ["使用昨天的应做日期，最后一轮完成后已结束，今日没有新增安排。"],
+  (_before, next) => {
+    assert.deepEqual(next.repeatCompletions, [
+      {
+        taskId: training.id,
+        date: yesterdayDate,
+        completedOn: today,
+      },
+    ]);
+    assert.deepEqual(next.arrangements, []);
   },
 );
 const clockCheckStarted = Date.now();
