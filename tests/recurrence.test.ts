@@ -231,28 +231,80 @@ test("主任务完成覆盖当天仍有安排的后代，恢复父项保留子�
   );
 });
 
-test("本轮完成后新增的子任务仍待做，停止后只保留当天已完成的安排", () => {
+test("本轮完成后新增子任务直接完成，下轮恢复待做", () => {
   const repeat = repeatingTask({ type: "daily" });
   repeat.complete(monday);
   const child = { ...newTask(repeat.task.id), title: "新增子任务" };
   repeat.apply({ type: "saveTask", task: child });
   assert.equal(
     repeat.state.arrangements.find(({ taskId }) => taskId === child.id)?.done,
-    false,
+    true,
+  );
+  assert.equal(repeat.progress.completionCount, 1);
+  assert.throws(
+    () =>
+      repeat.apply({
+        type: "setOccurrenceDone",
+        taskId: child.id,
+        date: monday,
+        done: false,
+      }),
+    /先撤销.*上级/,
   );
   repeat.apply({ type: "stopRecurrence", taskId: repeat.task.id });
   assert.deepEqual(
     repeat.state.arrangements.map(({ taskId, done }) => [taskId, done]),
-    [[repeat.task.id, true]],
+    [
+      [repeat.task.id, true],
+      [child.id, true],
+    ],
   );
   repeat.apply({ type: "resumeRecurrence", taskId: repeat.task.id });
   assert.deepEqual(
     repeat.state.arrangements.map(({ taskId, done }) => [taskId, done]),
     [
       [repeat.task.id, true],
-      [child.id, false],
+      [child.id, true],
     ],
   );
+  repeat.at(tuesday);
+  assert.deepEqual(
+    repeat.state.arrangements.map(({ done }) => done),
+    [false, false],
+  );
+});
+
+test("顶层任务归入父任务后随新父项排期，并保留此前的完成记录", () => {
+  const repeat = repeatingTask({ type: "daily" });
+  repeat.complete(monday);
+  const parent = {
+    ...newTask(),
+    title: "每周计划",
+    recurrence: { type: "weekly", weekdays: [1, 3] },
+  } satisfies ReturnType<typeof newTask>;
+  repeat.apply({
+    type: "saveTask",
+    task: parent,
+  });
+  const child = repeat.state.tasks.find(({ id }) => id === repeat.task.id)!;
+  repeat.apply({
+    type: "saveTask",
+    task: { ...child, parentId: parent.id, recurrence: undefined },
+  });
+  assert.deepEqual(
+    repeat.state.repeatSchedules.map(({ taskId }) => taskId),
+    [parent.id],
+  );
+  assert.equal(
+    repeat.state.arrangements.find(({ taskId }) => taskId === child.id)?.done,
+    false,
+  );
+  assert.deepEqual(
+    repeat.state.repeatCompletions.map(({ taskId }) => taskId),
+    [child.id],
+  );
+  repeat.at(tuesday);
+  assert.deepEqual(repeat.state.arrangements, []);
 });
 
 test("离开重复父任务后，父任务的整组跳过记录不再约束原子任务", () => {
@@ -615,13 +667,13 @@ test("撤销移除时，前一个事项已移除仍能回到后一个事项之�
   );
 });
 
-test("删除父任务会清理重复子任务的完成记录和当日安排", () => {
-  const parent = { ...newTask(), title: "学习规划" };
-  const child = {
-    ...newTask(parent.id),
-    title: "练英语",
+test("删除重复父任务会清理整组安排及轮次记录", () => {
+  const parent = {
+    ...newTask(),
+    title: "学习规划",
     recurrence: { type: "daily" as const },
   };
+  const child = { ...newTask(parent.id), title: "练英语" };
   const other = { ...newTask(), title: "整理会议纪要" };
   const today = "2026-11-25";
   let state = applyCommand(
@@ -638,7 +690,7 @@ test("删除父任务会清理重复子任务的完成记录和当日安排", ()
   );
   state = applyCommand(
     state,
-    { type: "setOccurrenceDone", taskId: child.id, date: today, done: true },
+    { type: "setOccurrenceDone", taskId: parent.id, date: today, done: true },
     today,
   );
   assert.equal(state.repeatCompletions.length, 1);

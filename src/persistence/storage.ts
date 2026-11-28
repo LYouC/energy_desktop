@@ -10,7 +10,7 @@ import { applyCommand } from "../domain/operations";
 import { synchronizeRecurrence } from "../domain/recurrence";
 import { applyAgentTurn } from "../agent/turn";
 
-const workspaceVersion = 10;
+const workspaceVersion = 11;
 
 export class WorkspaceDatabase {
   private db: DatabaseSync;

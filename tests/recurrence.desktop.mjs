@@ -312,6 +312,9 @@ try {
   await taskEditor.getByRole("button", { name: "添加子任务" }).click();
   await taskEditor.getByLabel("任务名称").fill("检查行动项");
   await expect(taskEditor.getByText("随所属任务重复 · 每天")).toBeVisible();
+  await expect(
+    taskEditor.getByRole("combobox", { name: "重复", exact: true }),
+  ).toHaveCount(0);
   await taskEditor
     .getByRole("button", { name: "保存任务", exact: true })
     .click();
@@ -359,13 +362,12 @@ try {
   await expect(childList).toBeHidden();
   await page.getByText("展开子任务（1）", { exact: true }).click();
   await expect(childList).toBeVisible();
-  await childList
-    .getByRole("button", { name: "恢复子任务本次安排：检查行动项" })
-    .click();
+  await expect(
+    childList.getByRole("button", { name: "恢复子任务本次安排：检查行动项" }),
+  ).toBeDisabled();
   await expect(
     parentCard.getByRole("button", { name: "恢复本次安排", exact: true }),
   ).toBeVisible();
-  await childCheck.click();
   await page.getByRole("button", { name: /所有任务/ }).click();
   await expect(childRow).toContainText("今日已完成");
   const completionFilter = page.getByLabel("按完成状态筛选");
@@ -391,31 +393,32 @@ try {
   await completionFilter.selectOption("all");
   await typeFilter.selectOption("all");
   await childRow.click();
+  await taskEditor.getByLabel("任务状态").selectOption("done");
+  await taskEditor
+    .getByRole("button", { name: "保存任务", exact: true })
+    .click();
+  await childRow.click();
   await parentField.selectOption(parentId);
   await taskEditor
     .getByRole("button", { name: "保存任务", exact: true })
     .click();
-  await expect(childRow).not.toContainText("今日已完成");
-  await page.getByRole("button", { name: /今日安排/ }).click();
-  await page.locator(".today-completed > summary").click();
-  await childCheck.click();
+  await expect(childRow).toContainText("今日已完成");
   await page.getByRole("button", { name: "已完成", exact: true }).click();
   await expect(completionFilter).toHaveCount(0);
-  const completedStages = page.getByRole("region", {
-    name: "今日已完成的重复任务",
-  });
-  await completedStages
-    .locator("article")
-    .filter({ hasText: "检查行动项" })
-    .getByRole("button", { name: "恢复本次安排" })
-    .click();
-  await expect(completedStages).not.toContainText("检查行动项");
   await page.getByRole("button", { name: /今日安排/ }).click();
   await page.locator(".today-completed > summary").click();
   await parentCard
     .getByRole("button", { name: "恢复本次安排", exact: true })
     .click();
+  await childList
+    .getByRole("button", { name: "恢复子任务本次安排：检查行动项" })
+    .click();
   await expect(childCheck).toBeVisible();
+  await page.getByRole("button", { name: /所有任务/ }).click();
+  await expect(childRow.locator(".list-dot")).toBeVisible();
+  await page.getByRole("button", { name: "已完成", exact: true }).click();
+  await expect(childRow).toHaveCount(0);
+  await page.getByRole("button", { name: /今日安排/ }).click();
   await childList
     .getByRole("button", { name: "检查行动项的安排操作" })
     .press("Enter");
@@ -625,6 +628,25 @@ try {
   await expect(cycleRow).toContainText("下次 2027-01-07");
   await expect(cycleRow).toContainText("今日已完成");
   await expect(cycleRow).toContainText("完成 1 次");
+  await cycleRow.locator(".task-list-row").click();
+  const cycleDetailsAfterCompletion = page.getByRole("dialog", {
+    name: "任务详情",
+  });
+  await cycleDetailsAfterCompletion
+    .getByRole("button", { name: "添加子任务" })
+    .click();
+  await cycleEditor.getByLabel("任务名称").fill("本轮补加步骤");
+  await expect(
+    cycleEditor.getByRole("combobox", { name: "重复", exact: true }),
+  ).toHaveCount(0);
+  await cycleEditor
+    .getByRole("button", { name: "保存任务", exact: true })
+    .click();
+  const lateCycleChild = page
+    .locator(".task-list-item")
+    .filter({ hasText: "本轮补加步骤" });
+  await expect(lateCycleChild).toContainText("今日已完成");
+  await expect(lateCycleChild.getByRole("checkbox")).toHaveCount(0);
   await expect(
     cycleRow.getByRole("button", { name: /提前完成|撤销完成/ }),
   ).toHaveCount(0);
@@ -635,6 +657,7 @@ try {
   await showDate("2027-01-07");
   await page.getByRole("button", { name: /所有任务/ }).click();
   await expect(cycleCheck).toHaveAttribute("aria-checked", "false");
+  await expect(lateCycleChild).toContainText("随所属任务");
 
   await showDate("2027-01-08");
   await expect(cycleCard).toHaveCount(0);

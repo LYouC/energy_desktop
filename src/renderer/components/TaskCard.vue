@@ -24,6 +24,7 @@ import { useWorkspace } from "@/stores/workspace";
 import { taskProgressForDate } from "../lib/recurrence";
 import { taskGroups, taskGroupRows } from "../lib/taskGroups";
 import { taskAncestorIds } from "../../domain/recurrence";
+import { hasCompletedAncestor } from "../../domain/operations";
 import { statusLabels, type Task, type Arrangement } from "../../domain/model";
 const props = defineProps<{
   task?: Task;
@@ -131,6 +132,16 @@ const title = computed(() => props.task?.title ?? "");
 function arrangementKind(item: Arrangement) {
   return item.recurrence ? "重复" : "";
 }
+function completionLocked(item: Arrangement) {
+  return (
+    item.done &&
+    hasCompletedAncestor(
+      store.state,
+      item.taskId,
+      item.recurrence ? item.date : undefined,
+    )
+  );
+}
 const kindLabel = computed(() => arrangementKind(props.arrangement));
 const showScope = computed(() => !props.arrangement.recurrence);
 function openDetails(task?: Task) {
@@ -215,6 +226,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
       <button
         v-else
         class="check"
+        :disabled="completionLocked(arrangement)"
         :aria-label="`${arrangement.done ? '恢复' : '完成'}${kindLabel ? '本次安排' : '任务'}`"
         :aria-pressed="arrangement.done"
         :title="
@@ -308,6 +320,7 @@ async function unschedule(item: Arrangement, focusTaskId?: string) {
               v-else
               type="button"
               class="check child-check"
+              :disabled="completionLocked(child.item)"
               :aria-label="`${child.item.done ? '恢复' : '完成'}子任务${arrangementKind(child.item) ? '本次安排' : ''}：${child.title}`"
               :aria-pressed="child.item.done"
               :data-stage-task-id="child.item.taskId"

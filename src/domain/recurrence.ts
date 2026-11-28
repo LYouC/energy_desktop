@@ -22,11 +22,9 @@ export function effectiveRecurrences(tasks: Task[]) {
     const task = byId.get(id);
     if (!task || resolving.has(id)) return;
     resolving.add(id);
-    const recurrence = task.recurrence
-      ? { sourceId: id, rule: task.recurrence }
-      : task.parentId
-        ? resolve(task.parentId)
-        : undefined;
+    const recurrence = task.parentId
+      ? resolve(task.parentId)
+      : task.recurrence && { sourceId: id, rule: task.recurrence };
     resolving.delete(id);
     resolved.set(id, recurrence);
     return recurrence;
@@ -177,7 +175,7 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
     state.repeatSchedules.map((entry) => [entry.taskId, entry]),
   );
   for (const task of state.tasks) {
-    if (!task.recurrence || schedules.has(task.id)) continue;
+    if (task.parentId || !task.recurrence || schedules.has(task.id)) continue;
     const schedule = { taskId: task.id, since: date };
     state.repeatSchedules.push(schedule);
     schedules.set(task.id, schedule);
@@ -199,7 +197,7 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
   );
   const completedToday = new Set(
     state.repeatCompletions
-      .filter((item) => item.date === date)
+      .filter((item) => item.date === date && schedules.has(item.taskId))
       .map((item) => item.taskId),
   );
   const todayItems = new Map(
@@ -234,21 +232,32 @@ export function synchronizeRecurrence(state: State, date: string): boolean {
     state.arrangements = retained;
     changed = true;
   }
+  const completed = new Set(completedToday);
+  for (const [id, sourceId] of visible) {
+    if (
+      id !== sourceId &&
+      todayItems.get(id)?.recurrence &&
+      todayItems.get(id)?.done
+    )
+      completed.add(id);
+  }
   for (const [id, sourceId] of visible) {
     const task = tasks.get(id)!;
     const existing = todayItems.get(id);
+    const done =
+      completed.has(id) ||
+      (id !== sourceId &&
+        taskAncestorIds(tasks, id).some((ancestor) => completed.has(ancestor)));
     if (!existing?.recurrence) {
       const values = {
         scope: task.title,
-        done: id === sourceId && completedToday.has(sourceId),
+        done,
         recurrence: { version: 0 },
       };
       if (existing) Object.assign(existing, values);
       else state.arrangements.push({ taskId: id, date, ...values });
       changed = true;
     } else {
-      const done =
-        id === sourceId ? completedToday.has(sourceId) : existing.done;
       if (existing.done !== done || existing.scope !== task.title) {
         existing.done = done;
         existing.scope = task.title;

@@ -76,20 +76,45 @@ export function completedUnscheduledTasksDue(state: State, date: string) {
   );
 }
 
+export function hasCompletedAncestor(
+  state: State,
+  taskId: string,
+  date?: string,
+) {
+  const tasks = new Map(state.tasks.map((task) => [task.id, task]));
+  return taskAncestorIds(tasks, taskId).some((id) =>
+    date
+      ? findOccurrence(state, id, date)?.done ||
+        (state.repeatSchedules.some((entry) => entry.taskId === id) &&
+          state.repeatCompletions.some(
+            (entry) => entry.taskId === id && entry.date === date,
+          ))
+      : tasks.get(id)?.status === "done",
+  );
+}
+
+function completeOrdinarySubtree(state: State, taskId: string, now: string) {
+  const ids = taskSubtreeIds(state.tasks, [taskId]);
+  for (const member of state.tasks) {
+    if (!ids.has(member.id) || member.status === "done") continue;
+    member.status = "done";
+    member.version++;
+    member.updatedAt = now;
+  }
+}
+
 function setTaskDone(state: State, taskId: string, done: boolean, now: string) {
   const task = findTask(state, taskId);
   const recurrences = effectiveRecurrences(state.tasks);
   if (recurrences.get(taskId)) throw new Error("请完成或撤销当前轮次。");
   if (task.status === "abandoned") throw new Error("请先恢复已放弃的任务。");
-  if ((task.status === "done") === done) return;
-  const ids = done ? taskSubtreeIds(state.tasks, [taskId]) : new Set([taskId]);
-  for (const member of state.tasks) {
-    if (!ids.has(member.id) || recurrences.get(member.id)) continue;
-    if (done ? !isTaskOpen(member) : member.status !== "done") continue;
-    member.status = done ? "done" : "todo";
-    member.version++;
-    member.updatedAt = now;
-  }
+  if (done) return completeOrdinarySubtree(state, taskId, now);
+  if (task.status !== "done") return;
+  if (hasCompletedAncestor(state, taskId))
+    throw new Error("请先恢复已完成的上级任务。");
+  task.status = "todo";
+  task.version++;
+  task.updatedAt = now;
 }
 function checkRelations(tasks: Task[]) {
   for (const task of tasks) {
@@ -120,7 +145,9 @@ export function checkRecurringTaskPatch(
 
 function checkRecurrence(task: Task, old: Task | undefined, date: string) {
   const rule = task.recurrence;
-  if (!rule && old?.recurrence) throw new Error("请使用停止重复或删除任务。");
+  if (task.parentId && rule) throw new Error("子任务沿用父任务的重复规则。");
+  if (!rule && old?.recurrence && !task.parentId)
+    throw new Error("请使用停止重复或删除任务。");
   if (!rule) return;
   if (task.status === "done" || task.status === "abandoned")
     throw new Error("请先恢复任务，再设置重复。");
@@ -228,6 +255,8 @@ function setOccurrenceDone(
     if (!item) task.version++;
   } else if (!item) {
     throw new Error("这次重复任务已变化，只能记录今天已安排的重复子任务。");
+  } else if (!done && item.done && hasCompletedAncestor(state, taskId, date)) {
+    throw new Error("请先撤销已完成的上级任务的本轮完成。");
   }
   if (!item) return;
   const descendants = done
@@ -387,6 +416,11 @@ function saveTask(state: State, input: Task, date: string, now: string) {
     ? effectiveRecurrences(state.tasks)
     : undefined;
   checkRecurrence(task, old, date);
+  if (old?.recurrence && task.parentId) {
+    state.repeatSchedules = state.repeatSchedules.filter(
+      (entry) => entry.taskId !== task.id,
+    );
+  }
   if (
     task.recurrence &&
     old?.recurrence &&
@@ -409,22 +443,50 @@ function saveTask(state: State, input: Task, date: string, now: string) {
   if (old) state.tasks[state.tasks.indexOf(old)] = task;
   else state.tasks.push(task);
   checkRelations(state.tasks);
+  const recurrences = effectiveRecurrences(state.tasks);
+  if (!recurrences.get(task.id)) {
+    if (hasCompletedAncestor(state, task.id)) {
+      if (
+        old &&
+        old.parentId === task.parentId &&
+        old.status === "done" &&
+        task.status !== "done"
+      )
+        throw new Error("请先恢复已完成的上级任务。");
+      task.status = "done";
+    }
+    if (task.status === "done") completeOrdinarySubtree(state, task.id, now);
+  }
 
   if (previousRecurrences) {
-    const recurrences = effectiveRecurrences(state.tasks);
     const moved =
       old && old.parentId !== task.parentId
         ? taskSubtreeIds(state.tasks, [task.id])
         : undefined;
+    const leftSource = new Set<string>();
     for (const member of state.tasks) {
-      if (member === task) continue;
       const previous = previousRecurrences.get(member.id);
       const current = recurrences.get(member.id);
+      if (
+        moved?.has(member.id) &&
+        previous &&
+        previous.sourceId !== current?.sourceId
+      )
+        leftSource.add(member.id);
+      if (member === task) continue;
       if (
         (current && moved?.has(member.id)) ||
         JSON.stringify(previous) !== JSON.stringify(current)
       )
         member.version++;
+    }
+    if (leftSource.size) {
+      for (const item of state.arrangements) {
+        if (!item.recurrence || !item.done || !leftSource.has(item.taskId))
+          continue;
+        item.done = false;
+        item.recurrence.version++;
+      }
     }
     synchronizeRecurrence(state, date);
   }
@@ -891,7 +953,18 @@ export function applyCommand(
           if (!change.patch) throw new Error("任务修改内容缺失。");
           const task = findTask(state, change.taskId);
           if (recurrences.get(task.id)) checkRecurringTaskPatch(change.patch);
-          saveTask(state, { ...task, ...change.patch }, date, now);
+          saveTask(
+            state,
+            {
+              ...task,
+              ...change.patch,
+              ...(change.patch.parentId && task.recurrence
+                ? { recurrence: undefined }
+                : {}),
+            },
+            date,
+            now,
+          );
         } else if (change.type === "unschedule") {
           removeArrangement(state, change.taskId, change.date);
         } else {
@@ -902,11 +975,8 @@ export function applyCommand(
             const task = {
               ...newTask(parent.id),
               ...child,
-              version: 1,
-              updatedAt: now,
             };
-            checkDates(task);
-            state.tasks.push(task);
+            saveTask(state, task, date, now);
             if (todayScope) schedule(state, task.id, change.date, todayScope);
           }
           parent.version++;

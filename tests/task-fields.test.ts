@@ -227,13 +227,13 @@ test("仍有当天移除记录的子任务不会从今日或所有任务入口�
   }
 });
 
-test("A21 整体完成覆盖各层一次性子任务，重复实例保持独立", () => {
+test("A21 整体完成覆盖各层一次性子任务及后来新增的子任务", () => {
   const date = "2026-11-23";
   const parent = { ...newTask(), title: "准备行程" };
   const child = { ...newTask(parent.id), title: "订票", expectedDate: date };
   const grandchild = { ...newTask(child.id), title: "核对目的地" };
   const repeat = {
-    ...newTask(parent.id),
+    ...newTask(),
     title: "每日查票",
     recurrence: { type: "daily" as const },
   };
@@ -262,6 +262,37 @@ test("A21 整体完成覆盖各层一次性子任务，重复实例保持独立"
   assert.deepEqual(
     context.today.map((item) => item.done),
     [false, true, true],
+  );
+  const lateChild = { ...newTask(child.id), title: "补充出行资料" };
+  const withLateChild = applyCommand(
+    completed,
+    { type: "saveTask", task: lateChild },
+    date,
+  );
+  assert.equal(
+    withLateChild.tasks.find(({ id }) => id === lateChild.id)?.status,
+    "done",
+  );
+  const savedLateChild = withLateChild.tasks.find(
+    ({ id }) => id === lateChild.id,
+  )!;
+  assert.throws(
+    () =>
+      applyCommand(
+        withLateChild,
+        { type: "saveTask", task: { ...savedLateChild, status: "todo" } },
+        date,
+      ),
+    /先恢复已完成的上级/,
+  );
+  assert.throws(
+    () =>
+      applyCommand(
+        withLateChild,
+        { ...complete, taskId: lateChild.id, done: false },
+        date,
+      ),
+    /先恢复已完成的上级/,
   );
   const restored = applyCommand(completed, { ...complete, done: false }, date);
   assert.deepEqual(

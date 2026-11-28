@@ -56,7 +56,7 @@ const occurrenceTarget = {
     ),
 };
 const recurrence = recurrenceRuleSchema.describe(
-  "daily 为每天，weekly 的 weekdays 使用 0=周日、1=周一至 6=周六，range 的 start/end 是含首尾的 YYYY-MM-DD。",
+  "仅顶层任务可设置。daily 为每天，weekly 的 weekdays 使用 0=周日、1=周一至 6=周六，range 的 start/end 是含首尾的 YYYY-MM-DD。",
 );
 // 未知字段由工具显式报错，供模型在本轮修正。
 const agentTaskPatchSchema = taskPatchSchema
@@ -274,7 +274,11 @@ export function applyAgentTurn(
     if (action.type === "createTask") {
       if (action.mode !== "direct")
         throw new Error("创建任务需要用户明确要求记录。");
-      if (action.recurrence) checkRecurringTaskPatch(action.patch);
+      if (action.recurrence) {
+        if (action.patch.parentId)
+          throw new Error("子任务沿用父任务的重复规则。");
+        checkRecurringTaskPatch(action.patch);
+      }
       const duplicate = state.tasks.find(
         (t) => t.title.trim() === action.title.trim(),
       );
@@ -358,6 +362,13 @@ export function applyAgentTurn(
       task = target;
     }
     const recurrences = effectiveRecurrences(state.tasks);
+    if (
+      task.parentId &&
+      (action.type === "updateRecurrence" ||
+        action.type === "stopRecurrence" ||
+        action.type === "resumeRecurrence")
+    )
+      throw new Error("子任务沿用父任务的重复规则，请核对要调整的顶层任务。");
     if (
       (recurrences.get(sourceId) || recurrences.get(task.id)) &&
       (action.type === "schedule" ||

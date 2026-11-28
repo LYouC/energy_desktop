@@ -34,12 +34,17 @@ const stopped = computed(
 const parentRecurrence = computed(() =>
   store.recurrences.get(draft.value.parentId ?? ""),
 );
+const parentCompleted = computed(() =>
+  store.state.tasks.some(
+    (task) => task.id === draft.value.parentId && task.status === "done",
+  ),
+);
 const repeatType = ref<RecurrenceRule["type"] | "none">(rule?.type ?? "none");
 const repeatDays = ref(rule?.type === "weekly" ? [...rule.weekdays] : []);
 const repeatStart = ref(rule?.type === "range" ? rule.start : props.date);
 const repeatEnd = ref(rule?.type === "range" ? rule.end : "");
 const recurrence = computed(() => {
-  if (repeatType.value === "none") return;
+  if (draft.value.parentId || repeatType.value === "none") return;
   if (repeatType.value === "daily") return { type: "daily" } as const;
   if (repeatType.value === "weekly")
     return { type: "weekly", weekdays: [...repeatDays.value].sort() } as const;
@@ -84,10 +89,12 @@ const ruleError = computed(() => {
   return "";
 });
 const repeatPreview = computed(() => {
+  if (draft.value.parentId)
+    return parentRecurrence.value
+      ? `随所属任务重复 · ${recurrenceLabel(parentRecurrence.value.rule)}`
+      : "随所属任务 · 不重复";
   if (ruleError.value) return ruleError.value;
   if (stopped.value) return "已停止重复";
-  if (!recurrence.value && parentRecurrence.value)
-    return `随所属任务重复 · ${recurrenceLabel(parentRecurrence.value.rule)}`;
   const result = recurrenceRuleSchema.safeParse(recurrence.value);
   if (!result.success) return "";
   const date = nextRecurrenceDate(result.data, props.date);
@@ -221,7 +228,9 @@ async function toggleRecurrence() {
       /></label>
       <div class="form-grid">
         <label v-if="!effectiveRule || (recurrence && inactive)">
-          任务状态<select v-model="draft.status">
+          任务状态<select v-if="parentCompleted" value="done" disabled>
+            <option value="done">{{ statusLabels.done }}</option></select
+          ><select v-else v-model="draft.status">
             <option
               v-for="(label, value) in statusLabels"
               :key="value"
@@ -252,24 +261,22 @@ async function toggleRecurrence() {
           >预计完成日期<input v-model="draft.expectedDate" type="date"
         /></label>
       </div>
-      <label>
+      <label v-if="!draft.parentId">
         重复<select v-model="repeatType">
-          <option v-if="!rule" value="none">
-            {{ parentRecurrence ? "跟随父任务" : "不重复" }}
-          </option>
+          <option v-if="!rule" value="none">不重复</option>
           <option value="daily">每天</option>
           <option value="weekly">每周自选星期</option>
           <option value="range">指定起止日期</option>
         </select>
       </label>
-      <fieldset v-if="repeatType === 'weekly'" class="repeat-days">
+      <fieldset v-if="recurrence?.type === 'weekly'" class="repeat-days">
         <legend>每周哪几天</legend>
         <label v-for="[day, name] in weekdays" :key="day">
           <input v-model="repeatDays" type="checkbox" :value="day" />
           {{ name }}
         </label>
       </fieldset>
-      <div v-else-if="repeatType === 'range'" class="form-grid">
+      <div v-else-if="recurrence?.type === 'range'" class="form-grid">
         <label
           >重复开始日期<input
             v-model="repeatStart"
@@ -315,7 +322,7 @@ async function toggleRecurrence() {
           >{{ savedRecurrence ? "删除重复任务" : "删除任务" }}</Button
         >
         <Button
-          v-if="existing && rule"
+          v-if="existing && rule && !draft.parentId"
           type="button"
           variant="ghost"
           :disabled="busy"

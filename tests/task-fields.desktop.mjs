@@ -172,7 +172,10 @@ try {
   await listSearch.clear();
 
   await saveTaskStatus(listParent, "done");
-  await saveTaskStatus(listChild, "todo");
+  await listChild.click();
+  await expect(dialog.getByLabel("任务状态")).toHaveValue("done");
+  await expect(dialog.getByLabel("任务状态")).toBeDisabled();
+  await page.keyboard.press("Escape");
   await completionFilter.selectOption("done");
   await expect(listCount).toContainText("2 项");
   await expect(page.locator(".task-list-item.is-nested")).toContainText(

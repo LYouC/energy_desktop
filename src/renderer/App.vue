@@ -45,6 +45,7 @@ import {
   completedUnscheduledTasksDue,
   isArrangementDone,
   isArrangementPending,
+  hasCompletedAncestor,
   schedulableTodayTasks,
   unscheduledTasksDue,
 } from "../domain/operations";
@@ -193,7 +194,9 @@ function matchesCompletionFilter(task: Task) {
 }
 const visibleTasks = computed(() =>
   (view.value === "completed"
-    ? store.state.tasks.filter((task) => task.status === "done")
+    ? store.state.tasks.filter(
+        (task) => task.status === "done" && !store.recurrences.get(task.id),
+      )
     : store.state.tasks
   ).filter(
     (task) =>
@@ -215,9 +218,22 @@ const taskRows = computed(() =>
     const repeat = repeatStatuses.value.get(row.item.id);
     const undo = repeat?.undo;
     const due = undo ?? (repeat?.canComplete ? repeat.target : null);
+    const sourceId = store.recurrences.get(row.item.id)?.sourceId;
+    const inheritedCompletion =
+      sourceId && sourceId !== row.item.id
+        ? repeatStatuses.value.get(sourceId)?.undo
+        : undefined;
+    const doneToday =
+      completedTodayIds.value.has(row.item.id) ||
+      (Boolean(sourceId) &&
+        taskAncestorIds(tasksById.value, row.item.id).some((id) =>
+          completedTodayIds.value.has(id),
+        ));
     return {
       ...row,
       repeat,
+      doneToday,
+      doneThisRound: Boolean(undo || inheritedCompletion),
       checkbox: due ? { date: due, checked: Boolean(undo) } : null,
     };
   }),
@@ -986,6 +1002,7 @@ async function energy(event: Event) {
                 <button
                   class="check"
                   type="button"
+                  :disabled="hasCompletedAncestor(store.state, task.id)"
                   :aria-label="`恢复任务：${task.title}`"
                   :aria-pressed="true"
                   :data-stage-task-id="task.id"
@@ -1093,7 +1110,14 @@ async function energy(event: Event) {
             >
           </div>
           <div
-            v-for="{ item: task, depth, repeat, checkbox } in taskRows"
+            v-for="{
+              item: task,
+              depth,
+              repeat,
+              checkbox,
+              doneToday,
+              doneThisRound,
+            } in taskRows"
             :key="task.id"
             class="task-list-item"
             :class="{ 'is-nested': depth > 0 }"
@@ -1145,7 +1169,9 @@ async function energy(event: Event) {
                 />
                 <CircleCheck
                   v-else-if="
-                    task.status === 'done' || completedTodayIds.has(task.id)
+                    doneToday ||
+                    doneThisRound ||
+                    (task.status === 'done' && !store.recurrences.get(task.id))
                   "
                   :size="17"
                 />
@@ -1193,10 +1219,8 @@ async function energy(event: Event) {
                 <template
                   v-else-if="view === 'all' && store.recurrences.get(task.id)"
                 >
-                  <small v-if="completedTodayIds.has(task.id)"
-                    >今日已完成</small
-                  >
-                  <small v-else-if="repeat?.undo">本轮已完成</small>
+                  <small v-if="doneToday">今日已完成</small>
+                  <small v-else-if="doneThisRound">本轮已完成</small>
                   <small v-if="store.isRecurrenceStopped(task.id)"
                     >已停止</small
                   >
@@ -1214,7 +1238,7 @@ async function energy(event: Event) {
                     <time :datetime="repeat.target">{{ repeat.target }}</time>
                   </small>
                   <small v-else-if="repeat">重复已结束</small>
-                  <small v-else-if="!completedTodayIds.has(task.id)"
+                  <small v-else-if="!doneToday && !doneThisRound"
                     >随所属任务</small
                   >
                 </template>

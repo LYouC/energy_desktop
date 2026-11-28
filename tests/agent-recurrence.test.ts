@@ -33,6 +33,67 @@ function withDailyTask() {
   ]);
 }
 
+test("Agent 子任务沿用父规则，已完成轮次新增子任务直接完成", () => {
+  const initial = withDailyTask();
+  const parentId = initial.tasks[0].id;
+  const done = turn(initial, [
+    {
+      type: "setOccurrenceDone",
+      mode: direct,
+      taskId: parentId,
+      date: today,
+      done: true,
+    },
+  ]);
+  const addChild = {
+    type: "createTask",
+    mode: direct,
+    title: "喝水",
+    patch: { parentId },
+  } as const;
+  assert.throws(
+    () =>
+      turn(done, [
+        { ...addChild, recurrence: { type: "weekly", weekdays: [1] } },
+      ]),
+    /子任务沿用父任务/,
+  );
+  const added = turn(done, [
+    addChild,
+    {
+      type: "split",
+      mode: direct,
+      taskId: parentId,
+      children: [{ title: "运动", description: "" }],
+    },
+  ]);
+  const child = added.tasks[1];
+  assert.deepEqual(
+    added.arrangements.map(({ done }) => done),
+    [true, true, true],
+  );
+  assert.equal(added.repeatCompletions.length, 1);
+  assert.equal(added.repeatSchedules.length, 1);
+  for (const mode of [direct, proposal]) {
+    assert.throws(
+      () =>
+        turn(added, [
+          {
+            type: "updateRecurrence",
+            mode,
+            taskId: child.id,
+            recurrence: { type: "daily" },
+          },
+        ]),
+      /子任务沿用父任务/,
+    );
+    assert.throws(
+      () => turn(added, [{ type: "stopRecurrence", mode, taskId: child.id }]),
+      /子任务沿用父任务/,
+    );
+  }
+});
+
 test("Agent 的直接操作和待接受建议都不能完成未来轮次", () => {
   const state = turn(emptyState(), [
     {

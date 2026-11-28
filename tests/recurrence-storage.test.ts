@@ -97,22 +97,26 @@ test("删除模板后清理今日安排和完成记录，Agent 的今日计划�
   );
 });
 
-test("已有子任务获得父规则，父规则立即生效，独立规则继续生效", (t) => {
+test("工作区只接受顶层重复规则，改规则后各层子任务一起排期", (t) => {
   let date = "2026-11-23";
   const db = new WorkspaceDatabase(":memory:", () => date);
   t.after(() => db.close());
   const parent = { ...newTask(), title: "工作计划" };
   const child = { ...newTask(parent.id), title: "练习" };
   const grandchild = { ...newTask(child.id), title: "热身" };
-  const independent = {
-    ...newTask(parent.id),
-    title: "独立周三计划",
-    recurrence: { type: "weekly" as const, weekdays: [3] },
-  };
   const execute = (command: Parameters<typeof db.execute>[1]) =>
     db.execute(db.load().revision, command);
-  for (const task of [parent, child, grandchild, independent])
+  for (const task of [parent, child, grandchild])
     execute({ type: "saveTask", task });
+  const tryChildRule = () =>
+    execute({
+      type: "saveTask",
+      task: {
+        ...db.load().tasks.find((task) => task.id === child.id)!,
+        recurrence: { type: "daily" },
+      },
+    });
+  assert.throws(tryChildRule, /子任务沿用父任务/);
   execute({ type: "schedule", taskId: child.id, date, scope: "保留既有范围" });
   const setParentRule = (weekdays: number[]) =>
     execute({
@@ -123,6 +127,7 @@ test("已有子任务获得父规则，父规则立即生效，独立规则继�
       },
     });
   setParentRule([1, 2]);
+  assert.throws(tryChildRule, /子任务沿用父任务/);
   execute({ type: "setOccurrenceDone", taskId: child.id, date, done: true });
   const first = db.load().arrangements;
   assert.equal(first.length, 3);
@@ -146,7 +151,7 @@ test("已有子任务获得父规则，父规则立即生效，独立规则继�
   date = "2026-11-25";
   assert.equal(
     db.load().arrangements.filter((item) => item.date === date).length,
-    4,
+    3,
   );
 });
 

@@ -198,7 +198,12 @@ export const proposalSchema = z
 export type Proposal = z.infer<typeof proposalSchema>;
 export const stateSchema = z.object({
   revision: z.number().int(),
-  tasks: z.array(taskSchema),
+  tasks: z.array(
+    taskSchema.refine(
+      (task) => !task.parentId || !task.recurrence,
+      "子任务沿用父任务的重复规则。",
+    ),
+  ),
   arrangements: z.array(arrangementSchema),
   repeatSchedules: z.array(
     z.object({

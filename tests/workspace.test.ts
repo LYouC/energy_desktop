@@ -400,7 +400,7 @@ test("拒绝非当前版本的数据库，原始工作区不被改写", () => {
   raw.exec("CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT)");
   const payload = JSON.stringify({ tasks: [{ title: "已有任务" }] });
   raw.prepare("INSERT INTO workspace VALUES (1, ?)").run(payload);
-  for (const version of [0, 9, 11]) {
+  for (const version of [0, 10, 12]) {
     raw.exec(`PRAGMA user_version=${version}`);
     assert.throws(
       () => new WorkspaceDatabase(filename),
@@ -429,7 +429,7 @@ test("开发模式重建过期工作区，后续打开保留同版本数据", (t
   const filename = path.join(directory, "workspace.db");
   const raw = new DatabaseSync(filename);
   raw.exec("CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT)");
-  raw.exec("PRAGMA user_version=9");
+  raw.exec("PRAGMA user_version=10");
   raw.prepare("INSERT INTO workspace VALUES (1, ?)").run('{"old":true}');
   raw.close();
 
