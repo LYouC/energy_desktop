@@ -1149,7 +1149,7 @@ async function energy(event: Event) {
                   "
                   :size="17"
                 />
-                <span v-else class="list-dot"></span>
+                <span v-else class="list-dot" aria-hidden="true"></span>
               </template>
               <span class="list-task-name">
                 <span class="task-title-line">

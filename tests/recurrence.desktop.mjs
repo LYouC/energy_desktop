@@ -445,6 +445,18 @@ try {
   await newDialog
     .getByRole("button", { name: "保存任务", exact: true })
     .click();
+  const skippedParentRow = page
+    .locator(".task-list-item")
+    .filter({ hasText: "短暂移除测试" });
+  await skippedParentRow.locator(".task-list-row").click();
+  await newDialog.getByRole("button", { name: "添加子任务" }).click();
+  await newDialog.getByLabel("任务名称").fill("随父任务跳过的子项");
+  await newDialog
+    .getByRole("button", { name: "保存任务", exact: true })
+    .click();
+  const skippedChildRow = page
+    .locator(".task-list-item")
+    .filter({ hasText: "随父任务跳过的子项" });
   await page.getByRole("button", { name: /今日安排/ }).click();
   await page.clock.install();
   const secondRemoval = page
@@ -467,6 +479,28 @@ try {
   await page.clock.fastForward(10_001);
   await expect(notice).toHaveCount(0);
   await expect(secondRemoval).toHaveCount(0);
+  await page.getByRole("button", { name: /所有任务/ }).click();
+  await expect(skippedParentRow).toContainText("下次");
+  await expect(skippedParentRow).toContainText("完成 0 次");
+  await expect(skippedChildRow).toContainText("随所属任务");
+  for (const colorScheme of ["light", "dark"]) {
+    await page.getByRole("button", { name: "我的空间 本地保存" }).click();
+    await page.getByLabel("主题").selectOption(colorScheme);
+    await page.getByRole("button", { name: "保存设置" }).click();
+    await expect(page.locator("html")).toHaveCSS("color-scheme", colorScheme);
+    for (const row of [skippedParentRow, skippedChildRow]) {
+      await expect(row.getByRole("checkbox")).toHaveCount(0);
+      const marker = row.locator(".list-dot");
+      await expect(marker).toBeVisible();
+      await expect(marker).toHaveCSS("border-radius", "50%");
+      await expect(marker).toHaveCSS("border-top-width", "0px");
+      await expect(marker).not.toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
+    }
+  }
+  await page.getByRole("button", { name: /今日安排/ }).click();
   await page.evaluate(async () => {
     let state = await window.desktop.load();
     const now = new Date();

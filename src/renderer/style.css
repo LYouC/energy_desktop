@@ -974,11 +974,12 @@ details.today-completed {
   font-size: 11px;
 }
 .list-dot {
-  width: 15px;
-  height: 15px;
+  width: 5px;
+  height: 5px;
+  margin-inline: 5px;
   flex-shrink: 0;
-  border: 1px solid var(--control);
-  border-radius: 4px;
+  border-radius: 50%;
+  background: var(--muted);
 }
 .chat {
   border-left: 1px solid var(--line);
